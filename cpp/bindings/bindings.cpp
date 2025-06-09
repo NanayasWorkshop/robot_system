@@ -6,6 +6,7 @@
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
+#include "../blocks/orientation_block.hpp"
 
 namespace py = pybind11;
 
@@ -20,6 +21,14 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     m.attr("BASE_A_ANGLE") = delta::BASE_A_ANGLE;
     m.attr("BASE_B_ANGLE") = delta::BASE_B_ANGLE;
     m.attr("BASE_C_ANGLE") = delta::BASE_C_ANGLE;
+    
+    // ===== COORDINATE FRAME CLASS =====
+    py::class_<delta::CoordinateFrame>(m, "CoordinateFrame")
+        .def(py::init<const Eigen::Vector3d&, const Eigen::Vector3d&, const Eigen::Vector3d&, const Eigen::Vector3d&>())
+        .def_readwrite("origin", &delta::CoordinateFrame::origin)
+        .def_readwrite("u_axis", &delta::CoordinateFrame::u_axis)
+        .def_readwrite("v_axis", &delta::CoordinateFrame::v_axis)
+        .def_readwrite("w_axis", &delta::CoordinateFrame::w_axis);
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {
@@ -46,6 +55,30 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         return std::make_tuple(result.prismatic_joint, result.roll_joint, result.pitch_joint,
                               result.calculation_time_ms, fermat_tuple);
     }, "Calculate joint states (prismatic, roll, pitch) from direction vector");
+    
+    // ===== ORIENTATION BLOCK =====
+    m.def("calculate_orientation", [](double x, double y, double z) {
+        // Get kinematics first (internal to C++)
+        auto kinematics_result = delta::KinematicsBlock::calculate(x, y, z);
+        
+        // Calculate orientation
+        auto result = delta::OrientationBlock::calculate(kinematics_result);
+        
+        // Return simple tuple like other blocks
+        auto final_frame_tuple = std::make_tuple(result.final_frame.origin, result.final_frame.u_axis, 
+                                                result.final_frame.v_axis, result.final_frame.w_axis);
+        
+        // Build complete kinematics tuple (matching kinematics block output format)
+        auto fermat_tuple = std::make_tuple(kinematics_result.fermat_data.z_A, kinematics_result.fermat_data.z_B, 
+                                           kinematics_result.fermat_data.z_C, kinematics_result.fermat_data.fermat_point, 
+                                           kinematics_result.fermat_data.calculation_time_ms);
+        auto kinematics_tuple = std::make_tuple(kinematics_result.point_H, kinematics_result.point_G, 
+                                               kinematics_result.HG_length, kinematics_result.end_effector_position, 
+                                               kinematics_result.calculation_time_ms, fermat_tuple);
+        
+        return std::make_tuple(result.end_effector_position, result.point_G, final_frame_tuple,
+                              result.transformation_matrix, result.calculation_time_ms, kinematics_tuple);
+    }, "Calculate orientation from direction vector");
     
     // ===== BLOCKS (FUTURE) =====
     // m.def("calculate_workspace", ...)

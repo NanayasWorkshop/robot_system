@@ -11,6 +11,7 @@ ext_modules = [
             "cpp/blocks/fermat_block.cpp",
             "cpp/blocks/kinematics_block.cpp", 
             "cpp/blocks/joint_state_block.cpp", 
+            "cpp/blocks/orientation_block.cpp", 
             # Add more .cpp files here as you create new blocks
         ],
         include_dirs=[

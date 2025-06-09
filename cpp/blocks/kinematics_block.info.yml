@@ -48,3 +48,4 @@ notes:
   - "This block internally calls FermatBlock to get fermat point"
   - "Uses geometric mirroring algorithm for end-effector calculation"
   - "Prismatic joint length calculated as 2.0 * fermat_point.z()"
+  - "Level 1 Block"

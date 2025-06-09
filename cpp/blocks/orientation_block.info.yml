@@ -1,0 +1,60 @@
+# orientation_block.info.yml
+name: "Orientation Block"
+description: "Calculates 4x4 transformation matrix and coordinate frames from kinematics result using 4-step coordinate transformation"
+version: "1.0"
+category: "composite_block"
+level: 2
+
+inputs:
+  - name: "kinematics_result"
+    type: "KinematicsResult"
+    description: "Complete kinematics calculation result from KinematicsBlock"
+    constraints: "Valid KinematicsResult with fermat_data and end_effector_position"
+
+outputs:
+  - name: "end_effector_position"
+    type: "Eigen::Vector3d"
+    description: "End-effector position from input kinematics result"
+  - name: "point_G"
+    type: "Eigen::Vector3d"
+    description: "Point G from input kinematics result"
+  - name: "final_frame"
+    type: "CoordinateFrame"
+    description: "Final U''V''W'' coordinate frame at end-effector"
+  - name: "transformation_matrix"
+    type: "Eigen::Matrix4d"
+    description: "4x4 homogeneous transformation matrix (position + orientation)"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+  - name: "kinematics_data"
+    type: "KinematicsResult"
+    description: "Complete input kinematics data for reference"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "blocks/kinematics_block.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "ROBOT_RADIUS"
+  - "BASE_A_ANGLE"
+  - "BASE_B_ANGLE"
+  - "BASE_C_ANGLE"
+
+internal_blocks:
+  - "KinematicsBlock (via input parameter)"
+
+algorithm:
+  - "Step 1: Create UVW coordinate frame at Fermat point"
+  - "Step 2: Mirror UVW across XY plane to get IJK frame"
+  - "Step 3: Align IJK with XYZ origin to get U'V'W' frame"
+  - "Step 4: Translate to end-effector position to get U''V''W'' frame"
+  - "Step 5: Create 4x4 transformation matrix from final frame"
+
+notes:
+  - "Level 2 block - uses KinematicsResult as input (no direct dependency on Level 0 blocks)"
+  - "Implements 4-step coordinate transformation algorithm"
+  - "Final transformation matrix combines position and orientation"
+  - "All intermediate coordinate frames available for debugging/visualization"
