@@ -1,0 +1,39 @@
+# fermat_block.info.yml
+name: "Fermat Block"
+description: "Calculates Fermat point and Z-positions from direction vector using geometric principles"
+version: "1.0"
+category: "fundamental_block"
+
+inputs:
+  - name: "input_vector"
+    type: "Eigen::Vector3d"
+    description: "Direction vector (will be normalized internally)"
+    constraints: "Any non-zero vector"
+
+outputs:
+  - name: "z_A"
+    type: "double"
+    description: "Z-position of point A on actuator arm A"
+  - name: "z_B"
+    type: "double"
+    description: "Z-position of point B on actuator arm B"
+  - name: "z_C"
+    type: "double"
+    description: "Z-position of point C on actuator arm C"
+  - name: "fermat_point"
+    type: "Eigen::Vector3d"
+    description: "Calculated Fermat point in 3D space"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "ROBOT_RADIUS"
+  - "BASE_A_ANGLE"
+  - "BASE_B_ANGLE" 
+  - "BASE_C_ANGLE"

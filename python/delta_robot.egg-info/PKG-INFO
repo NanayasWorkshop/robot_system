@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Name: delta-robot
+Version: 0.1.0
+Summary: Delta Robot Block-Based Control System
+Author: Your Name
+License: UNKNOWN
+Platform: UNKNOWN
+Requires-Python: >=3.8
+
+Clean, modular delta robot control with visualization
+

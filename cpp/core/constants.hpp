@@ -1,0 +1,21 @@
+#ifndef DELTA_CORE_CONSTANTS_HPP
+#define DELTA_CORE_CONSTANTS_HPP
+
+#include <cmath>
+
+namespace delta {
+
+// Robot Physical Constants
+constexpr double ROBOT_RADIUS = 24.8;
+constexpr double MIN_HEIGHT = 101.0;
+constexpr double WORKING_HEIGHT = 11.5; 
+constexpr double MOTOR_LIMIT = 11.0;
+
+// Geometry Constants - Base actuator positions (angles in radians)
+constexpr double BASE_A_ANGLE = M_PI / 2.0;                // 90 degrees (top)
+constexpr double BASE_B_ANGLE = -M_PI / 6.0;               // -30 degrees (bottom right)  
+constexpr double BASE_C_ANGLE = -5.0 * M_PI / 6.0;         // -150 degrees (bottom left)
+
+} // namespace delta
+
+#endif // DELTA_CORE_CONSTANTS_HPP
