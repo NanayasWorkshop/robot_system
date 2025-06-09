@@ -46,6 +46,9 @@ constants_used:
 internal_blocks:
   - "KinematicsBlock (via input parameter)"
 
+performance:
+  typical_time_range: "0.5-1.2ms"
+
 algorithm:
   - "Step 1: Create UVW coordinate frame at Fermat point"
   - "Step 2: Mirror UVW across XY plane to get IJK frame"

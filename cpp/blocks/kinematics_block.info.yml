@@ -1,8 +1,9 @@
-# kinematics_block.info.yml
-name: "Kinematics Block"
-description: "Calculates end-effector position, joint H, point G, and HG length from direction vector using geometric mirroring"
+# joint_state_block.info.yml
+name: "Joint State Block"
+description: "Calculates prismatic, roll, and pitch joint states from direction vector using fermat point"
 version: "1.0"
 category: "composite_block"
+level: 1
 
 inputs:
   - name: "direction_vector"
@@ -11,18 +12,15 @@ inputs:
     constraints: "Any non-zero vector with positive Z component"
 
 outputs:
-  - name: "point_H"
-    type: "Eigen::Vector3d"
-    description: "Joint H position (fixed at working height)"
-  - name: "point_G"
-    type: "Eigen::Vector3d"
-    description: "Point G along direction vector from H"
-  - name: "HG_length"
+  - name: "prismatic_joint"
     type: "double"
-    description: "Distance between points H and G"
-  - name: "end_effector_position"
-    type: "Eigen::Vector3d"
-    description: "Final end-effector position using geometric mirroring"
+    description: "Prismatic joint position (2.0 * fermat_point.z())"
+  - name: "roll_joint"
+    type: "double"
+    description: "Roll joint angle (rotation around X-axis)"
+  - name: "pitch_joint"
+    type: "double"
+    description: "Pitch joint angle (rotation around Y-axis)"
   - name: "calculation_time_ms"
     type: "double"
     description: "Time taken for calculation in milliseconds"
@@ -37,15 +35,16 @@ dependencies:
   - "Eigen/Dense"
 
 constants_used:
-  - "WORKING_HEIGHT"
-  - "MIN_HEIGHT"
-  - "MOTOR_LIMIT"
+  - "None"
 
 internal_blocks:
   - "FermatBlock"
 
+performance:
+  typical_time_range: "0.2-0.5ms"
+
 notes:
-  - "This block internally calls FermatBlock to get fermat point"
-  - "Uses geometric mirroring algorithm for end-effector calculation"
-  - "Prismatic joint length calculated as 2.0 * fermat_point.z()"
-  - "Level 1 Block"
+  - "Level 1 composite block - uses FermatBlock internally"
+  - "Prismatic joint calculated as 2.0 * fermat_point.z()"
+  - "Roll and pitch calculated from normalized direction vector"
+  - "Safe design prevents mismatched direction/fermat data"

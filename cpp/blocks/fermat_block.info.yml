@@ -3,12 +3,13 @@ name: "Fermat Block"
 description: "Calculates Fermat point and Z-positions from direction vector using geometric principles"
 version: "1.0"
 category: "fundamental_block"
+level: 0
 
 inputs:
   - name: "input_vector"
     type: "Eigen::Vector3d"
     description: "Direction vector (will be normalized internally)"
-    constraints: "Any non-zero vector"
+    constraints: "Any non-zero vector with positive Z component"
 
 outputs:
   - name: "z_A"
@@ -37,3 +38,14 @@ constants_used:
   - "BASE_A_ANGLE"
   - "BASE_B_ANGLE" 
   - "BASE_C_ANGLE"
+
+internal_blocks:
+  - "None"
+
+performance:
+  typical_time_range: "0.1-0.3ms"
+
+notes:
+  - "Fundamental block - no dependencies on other blocks"
+  - "Uses true geometric Fermat point algorithm with lambda calculations"
+  - "Input validation ensures non-zero vector with positive Z component"

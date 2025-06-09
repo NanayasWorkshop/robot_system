@@ -75,6 +75,12 @@ private:
     static Eigen::Vector3d build_point_A(double z_A);
     static Eigen::Vector3d build_point_B(double z_B);
     static Eigen::Vector3d build_point_C(double z_C);
+    
+    // Direction validation
+    static bool validate_direction_consistency(const Eigen::Vector3d& point_G,
+                                             const Eigen::Vector3d& end_effector,
+                                             const Eigen::Vector3d& final_w_axis,
+                                             double tolerance = 1e-3);
 };
 
 } // namespace delta

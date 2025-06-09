@@ -6,7 +6,7 @@
 namespace delta {
 
 /**
- * RAII Timer for automatic timing measurement
+ * RAII Timer for automatic timing measurement with high precision
  * Usage:
  *   double time_ms = 0.0;
  *   {
@@ -25,8 +25,10 @@ public:
     
     ~ScopedTimer() {
         auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        result_ms = duration.count() / 1000.0;  // Convert to milliseconds
+        
+        // FIX: Use double-precision milliseconds directly - no truncation
+        auto duration = std::chrono::duration<double, std::milli>(end_time - start_time);
+        result_ms = duration.count();  // Already in milliseconds with full precision
     }
     
     // Prevent copying

@@ -3,6 +3,7 @@ name: "Joint State Block"
 description: "Calculates prismatic, roll, and pitch joint states from direction vector using fermat point"
 version: "1.0"
 category: "composite_block"
+level: 1
 
 inputs:
   - name: "direction_vector"
@@ -33,11 +34,17 @@ dependencies:
   - "blocks/fermat_block.hpp"
   - "Eigen/Dense"
 
+constants_used:
+  - "None"
+
 internal_blocks:
   - "FermatBlock"
 
+performance:
+  typical_time_range: "0.2-0.5ms"
+
 notes:
-  - "This block internally calls FermatBlock to get fermat point"
+  - "Level 1 composite block - uses FermatBlock internally"
   - "Prismatic joint calculated as 2.0 * fermat_point.z()"
   - "Roll and pitch calculated from normalized direction vector"
   - "Safe design prevents mismatched direction/fermat data"

@@ -31,6 +31,11 @@ OrientationResult OrientationBlock::calculate(const KinematicsResult& kinematics
         // Step 4: Translate to end-effector position to get U''V''W''
         CoordinateFrame final_frame = translate_to_endeffector(aligned_frame, end_effector);
         
+        // Validate direction consistency
+        if (!validate_direction_consistency(point_G, end_effector, final_frame.w_axis)) {
+            throw std::runtime_error("Direction validation failed: G→End-effector vector does not align with final W-axis");
+        }
+        
         // Create transformation matrix from final frame
         Eigen::Matrix4d transformation = create_transformation_matrix(final_frame);
         
@@ -161,6 +166,27 @@ Eigen::Vector3d OrientationBlock::build_point_C(double z_C) {
         ROBOT_RADIUS * std::sin(BASE_C_ANGLE),
         z_C
     );
+}
+
+bool OrientationBlock::validate_direction_consistency(const Eigen::Vector3d& point_G,
+                                                     const Eigen::Vector3d& end_effector,
+                                                     const Eigen::Vector3d& final_w_axis,
+                                                     double tolerance) {
+    // Calculate G → End-effector vector
+    Eigen::Vector3d G_to_endeffector = end_effector - point_G;
+    
+    // Handle degenerate case
+    if (G_to_endeffector.norm() < tolerance) {
+        return true;  // G and end-effector are essentially same point
+    }
+    
+    // Normalize both vectors
+    Eigen::Vector3d normalized_G_to_end = G_to_endeffector.normalized();
+    Eigen::Vector3d normalized_final_w = final_w_axis.normalized();
+    
+    // Check alignment (dot product should be close to 1.0 for same direction)
+    double dot_product = normalized_G_to_end.dot(normalized_final_w);
+    return std::abs(dot_product - 1.0) < tolerance;
 }
 
 } // namespace delta
