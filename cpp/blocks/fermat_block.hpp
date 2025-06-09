@@ -20,7 +20,7 @@ struct FermatResult {
 
 class FermatBlock {
 public:
-    // Main interface: input direction vector, get Fermat calculation
+    // Main interface: input direction vector, get true Fermat calculation
     static FermatResult calculate(double x, double y, double z);
     static FermatResult calculate(const Eigen::Vector3d& input_vector);
     
@@ -30,11 +30,16 @@ public:
     static Eigen::Vector3d get_base_position_C();
 
 private:
+    // Internal data structure for detailed Fermat calculation
+    struct FermatCalculationData {
+        double z_A, z_B, z_C;           // Z positions of triangle vertices
+        Eigen::Vector3d fermat_point;   // True Fermat point
+    };
+    
     // Internal calculation helpers
-    static Eigen::Vector3d calculate_fermat_point(const Eigen::Vector3d& normalized_direction);
-    static double calculate_z_position(const Eigen::Vector3d& base_position, 
-                                     const Eigen::Vector3d& fermat_point, 
-                                     const Eigen::Vector3d& normalized_direction);
+    static FermatCalculationData calculate_true_fermat_point(const Eigen::Vector3d& normalized_direction);
+    static double calculate_z_intersection(double base_x, double base_y, 
+                                         const Eigen::Vector3d& normal);
 };
 
 } // namespace delta

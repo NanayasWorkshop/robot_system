@@ -10,7 +10,7 @@ from joint_state_wrapper import calculate_joint_state
 
 def main():
     try:
-        prismatic, roll, pitch, calc_time, fermat_data = calculate_joint_state(0.2, 0.8, 1, debug=True)
+        prismatic, roll, pitch, calc_time, fermat_data = calculate_joint_state(1, 1, 1, debug=True)
         
         print(f"Prismatic joint: {prismatic:.3f}")
         print(f"Roll joint: {roll:.3f} rad")
