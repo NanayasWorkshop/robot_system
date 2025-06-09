@@ -1,0 +1,50 @@
+# kinematics_block.info.yml
+name: "Kinematics Block"
+description: "Calculates end-effector position, joint H, point G, and HG length from direction vector using geometric mirroring"
+version: "1.0"
+category: "composite_block"
+
+inputs:
+  - name: "direction_vector"
+    type: "Eigen::Vector3d"
+    description: "Direction vector (will be normalized internally)"
+    constraints: "Any non-zero vector with positive Z component"
+
+outputs:
+  - name: "point_H"
+    type: "Eigen::Vector3d"
+    description: "Joint H position (fixed at working height)"
+  - name: "point_G"
+    type: "Eigen::Vector3d"
+    description: "Point G along direction vector from H"
+  - name: "HG_length"
+    type: "double"
+    description: "Distance between points H and G"
+  - name: "end_effector_position"
+    type: "Eigen::Vector3d"
+    description: "Final end-effector position using geometric mirroring"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+  - name: "fermat_data"
+    type: "FermatResult"
+    description: "Complete fermat calculation results for reference"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "blocks/fermat_block.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "WORKING_HEIGHT"
+  - "MIN_HEIGHT"
+  - "MOTOR_LIMIT"
+
+internal_blocks:
+  - "FermatBlock"
+
+notes:
+  - "This block internally calls FermatBlock to get fermat point"
+  - "Uses geometric mirroring algorithm for end-effector calculation"
+  - "Prismatic joint length calculated as 2.0 * fermat_point.z()"

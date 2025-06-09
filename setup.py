@@ -9,6 +9,7 @@ ext_modules = [
         [
             "cpp/bindings/bindings.cpp",
             "cpp/blocks/fermat_block.cpp",
+            "cpp/blocks/kinematics_block.cpp", 
             # Add more .cpp files here as you create new blocks
         ],
         include_dirs=[

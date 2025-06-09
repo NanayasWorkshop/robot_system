@@ -4,6 +4,7 @@
 
 // Include all blocks
 #include "../blocks/fermat_block.hpp"
+#include "../blocks/kinematics_block.hpp"
 
 namespace py = pybind11;
 
@@ -25,8 +26,17 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         return std::make_tuple(result.z_A, result.z_B, result.z_C, result.fermat_point, result.calculation_time_ms);
     }, "Calculate Fermat point and Z positions from direction vector");
     
+    // ===== KINEMATICS BLOCK =====
+    m.def("calculate_kinematics", [](double x, double y, double z) {
+        auto result = delta::KinematicsBlock::calculate(x, y, z);
+        // Return: point_H, point_G, HG_length, end_effector, calculation_time_ms, fermat_data
+        auto fermat_tuple = std::make_tuple(result.fermat_data.z_A, result.fermat_data.z_B, result.fermat_data.z_C, 
+                                           result.fermat_data.fermat_point, result.fermat_data.calculation_time_ms);
+        return std::make_tuple(result.point_H, result.point_G, result.HG_length, 
+                              result.end_effector_position, result.calculation_time_ms, fermat_tuple);
+    }, "Calculate kinematics (H, G, end-effector) from direction vector");
+    
     // ===== BLOCKS (FUTURE) =====
-    // m.def("calculate_kinematics", ...)
     // m.def("calculate_joint_state", ...)
     
     // ===== ADVANCED (FUTURE) =====
