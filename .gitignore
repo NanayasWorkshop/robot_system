@@ -1,6 +1,7 @@
 # Build directories
 build/
 cpp/build/
+python/delta_robot.egg-info/
 
 # Compiled Python files
 __pycache__/
