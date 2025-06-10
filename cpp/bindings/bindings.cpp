@@ -7,6 +7,7 @@
 #include "../blocks/fabrik_initialization_block.hpp"
 #include "../blocks/fabrik_backward_block.hpp"
 #include "../blocks/fabrik_forward_block.hpp"
+#include "../blocks/fabrik_solver_block.hpp"
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
@@ -71,6 +72,23 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         return std::make_tuple(result.updated_joint_positions, result.recalculated_segment_lengths, 
                               result.distance_to_target, result.calculation_time_ms);
     }, "Single forward pass from base to end with dynamic segment recalculation");
+    
+    // ===== FABRIK SOLVER BLOCK =====
+    m.def("calculate_fabrik_solver", [](const Eigen::Vector3d& target_position,
+                                       std::optional<std::vector<Eigen::Vector3d>> initial_joint_positions,
+                                       int num_robot_segments,
+                                       double tolerance,
+                                       int max_iterations) {
+        auto result = delta::FabrikSolverBlock::solve(target_position, initial_joint_positions, 
+                                                     num_robot_segments, tolerance, max_iterations);
+        return std::make_tuple(result.final_joint_positions, result.achieved_position, result.converged,
+                              result.final_error, result.total_iterations, result.solve_time_ms);
+    }, "Complete FABRIK solver with backward/forward cycles until convergence",
+       py::arg("target_position"), 
+       py::arg("initial_joint_positions") = py::none(),
+       py::arg("num_robot_segments") = delta::DEFAULT_ROBOT_SEGMENTS,
+       py::arg("tolerance") = delta::FABRIK_TOLERANCE,
+       py::arg("max_iterations") = delta::FABRIK_MAX_ITERATIONS);
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {

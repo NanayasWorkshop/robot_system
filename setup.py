@@ -17,6 +17,7 @@ ext_modules = [
             "cpp/blocks/fabrik_initialization_block.cpp", 
             "cpp/blocks/fabrik_backward_block.cpp",
             "cpp/blocks/fabrik_forward_block.cpp",
+            "cpp/blocks/fabrik_solver_block.cpp",
             # Add more .cpp files here as you create new blocks
         ],
         include_dirs=[
