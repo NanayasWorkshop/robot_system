@@ -35,14 +35,10 @@ private:
                                                            const Eigen::Vector3d& target_position,
                                                            std::vector<double>& recalculated_lengths);
     
-    // Extract direction pairs for segment calculation
-    static std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> extract_direction_pairs(
-        const std::vector<Eigen::Vector3d>& joint_positions, int up_to_joint);
-    
-    // Calculate new segment length using SegmentBlock
-    static double calculate_new_segment_length(const Eigen::Vector3d& current_direction,
-                                              const Eigen::Vector3d& previous_direction,
-                                              int segment_index, int total_segments);
+    // FIXED: Calculate new segment length using complete joint chain with SegmentBlock
+    // This preserves full transformation context and J→S conversion
+    static double calculate_new_segment_length_from_complete_chain(const std::vector<Eigen::Vector3d>& complete_joint_chain,
+                                                                  int segment_index, int total_segments);
     
     // Apply cone constraint for spherical joints (forward version)
     static Eigen::Vector3d apply_cone_constraint_if_needed(const Eigen::Vector3d& desired_direction,

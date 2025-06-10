@@ -56,25 +56,13 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
         // Calculate desired direction: from J_prev_prime toward J_current_original
         Eigen::Vector3d desired_direction = J_current_original - J_prev_prime;
         
-        // Extract direction pairs for segment calculation
-        std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> direction_pairs = 
-            extract_direction_pairs(updated_positions, i);
-        
-        // Calculate new segment length using SegmentBlock
-        Eigen::Vector3d current_direction, previous_direction;
-        
-        if (!direction_pairs.empty()) {
-            current_direction = direction_pairs.back().second;   // Target direction for this segment
-            previous_direction = direction_pairs.back().first;   // Reference direction
-        } else {
-            // Fallback for first segment
-            current_direction = desired_direction.normalized();
-            previous_direction = Eigen::Vector3d(0, 0, 1); // Z+ default
-        }
-        
-        // Calculate new segment length dynamically
-        double new_segment_length = calculate_new_segment_length(current_direction, previous_direction, 
-                                                               i - 1, total_segments);
+        // FIXED: Calculate new segment length using complete joint chain with SegmentBlock
+        // This preserves the full transformation context that was lost in the original implementation
+        double new_segment_length = calculate_new_segment_length_from_complete_chain(
+            original_positions,  // Complete original chain for full context
+            i - 1,              // Segment index (0-based: i=1 → segment 0, i=2 → segment 1, etc.)
+            total_segments      // Total number of segments
+        );
         
         // Store the recalculated length
         recalculated_lengths.push_back(new_segment_length);
@@ -114,68 +102,28 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
     return updated_positions;
 }
 
-std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> FabrikForwardBlock::extract_direction_pairs(
-    const std::vector<Eigen::Vector3d>& joint_positions, int up_to_joint) {
-    
-    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> direction_pairs;
-    
-    // Extract direction pairs for segments up to current joint
-    for (int seg = 0; seg < up_to_joint - 1; seg++) {
-        if (seg + 2 < static_cast<int>(joint_positions.size())) {
-            // Reference direction: [seg] → [seg+1]
-            Eigen::Vector3d ref_direction = (joint_positions[seg + 1] - joint_positions[seg]).normalized();
-            
-            // Target direction: [seg+1] → [seg+2]
-            Eigen::Vector3d target_direction = (joint_positions[seg + 2] - joint_positions[seg + 1]).normalized();
-            
-            direction_pairs.push_back(std::make_pair(ref_direction, target_direction));
-        }
-    }
-    
-    return direction_pairs;
-}
-
-double FabrikForwardBlock::calculate_new_segment_length(const Eigen::Vector3d& current_direction,
-                                                       const Eigen::Vector3d& previous_direction,
-                                                       int segment_index, int total_segments) {
+double FabrikForwardBlock::calculate_new_segment_length_from_complete_chain(const std::vector<Eigen::Vector3d>& complete_joint_chain,
+                                                                           int segment_index, int total_segments) {
     try {
-        // DEBUG: Print input directions
-        std::cout << "  [DEBUG] Segment " << segment_index << " calculation:" << std::endl;
-        std::cout << "    Current Direction: (" << current_direction.x() << ", " << current_direction.y() << ", " << current_direction.z() << ")" << std::endl;
-        std::cout << "    Previous Direction: (" << previous_direction.x() << ", " << previous_direction.y() << ", " << previous_direction.z() << ")" << std::endl;
-        
-        // Use SegmentBlock to calculate prismatic length with coordinate transformation
-        SegmentResult segment_result = SegmentBlock::calculate_essential(current_direction, previous_direction);
-        
-        // DEBUG: Print SegmentBlock result
-        std::cout << "    SegmentBlock Success: " << segment_result.calculation_successful << std::endl;
-        std::cout << "    Prismatic Length: " << segment_result.prismatic_length << std::endl;
+        // FIXED: Use SegmentBlock with complete joint chain context
+        // This preserves all transformations and J→S conversion context
+        SegmentResult segment_result = SegmentBlock::calculate_essential_from_joints(
+            complete_joint_chain, segment_index);
         
         if (!segment_result.calculation_successful) {
             // Fallback to minimum segment length
-            std::cout << "    Using fallback (calculation failed)" << std::endl;
-            double fallback = convert_prismatic_to_fabrik_length(0.0, segment_index, total_segments);
-            std::cout << "    Final FABRIK Length: " << fallback << std::endl;
-            return fallback;
+            return convert_prismatic_to_fabrik_length(0.0, segment_index, total_segments);
         }
         
         // Convert prismatic length to FABRIK segment length
-        double fabrik_length = convert_prismatic_to_fabrik_length(segment_result.prismatic_length, segment_index, total_segments);
-        
-        // DEBUG: Print conversion result
-        std::cout << "    Final FABRIK Length: " << fabrik_length << std::endl;
+        double fabrik_length = convert_prismatic_to_fabrik_length(
+            segment_result.prismatic_length, segment_index, total_segments);
         
         return fabrik_length;
         
     } catch (const std::exception& e) {
-        // DEBUG: Print error
-        std::cout << "    ERROR: " << e.what() << std::endl;
-        std::cout << "    Using fallback (exception)" << std::endl;
-        
         // Fallback calculation for errors
-        double fallback = convert_prismatic_to_fabrik_length(0.0, segment_index, total_segments);
-        std::cout << "    Final FABRIK Length: " << fallback << std::endl;
-        return fallback;
+        return convert_prismatic_to_fabrik_length(0.0, segment_index, total_segments);
     }
 }
 
