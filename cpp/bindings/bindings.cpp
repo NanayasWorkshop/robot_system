@@ -15,7 +15,7 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(delta_robot_cpp, m) {
-    m.doc() = "Delta Robot C++ Modules - Clean Block-Based Architecture";
+    m.doc() = "Delta Robot C++ Modules - Clean Block-Based Architecture with Prismatic Refinement";
     
     // ===== CONSTANTS =====
     m.attr("ROBOT_RADIUS") = delta::ROBOT_RADIUS;
@@ -29,6 +29,10 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     m.attr("SPHERICAL_JOINT_CONE_ANGLE_RAD") = delta::SPHERICAL_JOINT_CONE_ANGLE_RAD;
     m.attr("FABRIK_TOLERANCE") = delta::FABRIK_TOLERANCE;
     m.attr("FABRIK_MAX_ITERATIONS") = delta::FABRIK_MAX_ITERATIONS;
+    
+    // NEW: Prismatic Refinement Constants
+    m.attr("FABRIK_PRISMATIC_TOLERANCE") = delta::FABRIK_PRISMATIC_TOLERANCE;
+    m.attr("FABRIK_MAX_REFINEMENT_ITERATIONS") = delta::FABRIK_MAX_REFINEMENT_ITERATIONS;
     
     // ===== COORDINATE FRAME CLASS =====
     py::class_<delta::CoordinateFrame>(m, "CoordinateFrame")
@@ -162,7 +166,7 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
                               result.error_message);
     }, "Perform single FABRIK iteration with cone constraints");
     
-    // ===== FABRIK SOLVER BLOCK =====
+    // ===== FABRIK SOLVER BLOCK - BASIC =====
     m.def("fabrik_solve", [](const Eigen::Vector3d& target_position,
                             int num_segments = delta::DEFAULT_ROBOT_SEGMENTS,
                             double tolerance = delta::FABRIK_TOLERANCE,
@@ -184,4 +188,37 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
        py::arg("num_segments") = delta::DEFAULT_ROBOT_SEGMENTS,
        py::arg("tolerance") = delta::FABRIK_TOLERANCE,
        py::arg("max_iterations") = delta::FABRIK_MAX_ITERATIONS);
+
+    // ===== FABRIK SOLVER BLOCK - WITH PRISMATIC REFINEMENT =====
+    m.def("fabrik_solve_with_refinement", [](const Eigen::Vector3d& target_position,
+                                             int num_segments = delta::DEFAULT_ROBOT_SEGMENTS,
+                                             double fabrik_tolerance = delta::FABRIK_TOLERANCE,
+                                             int max_fabrik_iterations = delta::FABRIK_MAX_ITERATIONS,
+                                             double prismatic_tolerance = delta::FABRIK_PRISMATIC_TOLERANCE,
+                                             int max_refinement_iterations = delta::FABRIK_MAX_REFINEMENT_ITERATIONS) {
+        auto result = delta::FabrikSolverBlock::solve_with_prismatic_refinement(
+            target_position, num_segments, fabrik_tolerance, max_fabrik_iterations, 
+            prismatic_tolerance, max_refinement_iterations);
+        
+        auto init_tuple = std::make_tuple(result.initialization_data.initial_joints, 
+                                         result.initialization_data.joint_distances,
+                                         result.initialization_data.num_segments,
+                                         result.initialization_data.num_joints,
+                                         result.initialization_data.calculation_time_ms,
+                                         result.initialization_data.initialization_successful,
+                                         result.initialization_data.error_message);
+        
+        return std::make_tuple(result.final_joints, result.final_prismatic_lengths,
+                              result.fabrik_iterations_used, result.refinement_iterations_used,
+                              result.final_distance_to_target, result.converged,
+                              result.prismatic_converged, result.calculation_time_ms,
+                              result.solving_successful, result.error_message,
+                              init_tuple, result.initial_joints, result.initial_prismatic_lengths);
+    }, "Complete FABRIK solving with prismatic refinement for physical accuracy",
+       py::arg("target_position"), 
+       py::arg("num_segments") = delta::DEFAULT_ROBOT_SEGMENTS,
+       py::arg("fabrik_tolerance") = delta::FABRIK_TOLERANCE,
+       py::arg("max_fabrik_iterations") = delta::FABRIK_MAX_ITERATIONS,
+       py::arg("prismatic_tolerance") = delta::FABRIK_PRISMATIC_TOLERANCE,
+       py::arg("max_refinement_iterations") = delta::FABRIK_MAX_REFINEMENT_ITERATIONS);
 }

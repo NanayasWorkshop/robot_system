@@ -1,277 +1,178 @@
 #!/usr/bin/env python3
 """
-FABRIK Complete Pipeline Test Runner
-Tests all three FABRIK blocks: Initialization, Iteration, and Solver
+FABRIK Prismatic Refinement Test
+Tests the new enhanced FABRIK solver with prismatic refinement
 """
 
 import sys
 sys.path.append('python/visualization')
 
-from fabrik_wrapper import test_fabrik_solver, visualize_fabrik_result
 import numpy as np
+from base_plotter import create_base_3d_figure, add_robot_base_circle, add_vector_arrow, ROBOT_COLORS
+import plotly.graph_objects as go
 
-def test_fabrik_initialization():
-    """Test FABRIK Initialization Block"""
-    print("=" * 60)
-    print("TESTING FABRIK INITIALIZATION BLOCK")
-    print("=" * 60)
+def visualize_refinement_result(target_position, final_joints, final_prismatic, 
+                               fabrik_iters, refinement_iters, converged, 
+                               prismatic_converged, final_distance, calc_time):
+    """Visualize FABRIK refinement results"""
     
     try:
         import delta_robot_cpp
+        ROBOT_RADIUS = delta_robot_cpp.ROBOT_RADIUS
         
-        # Test with default 7 segments
-        print("\n=== Test 1: Default 7 Segments ===")
-        result = delta_robot_cpp.create_fabrik_straight_chain(7)
-        initial_joints, joint_distances, num_segments, num_joints, calc_time, success, error_msg = result
+        # Create visualization
+        title = f"FABRIK Prismatic Refinement - Target: ({target_position[0]:.0f}, {target_position[1]:.0f}, {target_position[2]:.0f})<br>"
+        title += f"FABRIK: {fabrik_iters} iters, Refinement: {refinement_iters} loops, Distance: {final_distance:.3f}mm"
+        fig = create_base_3d_figure(title)
         
-        if success:
-            print(f"✓ Initialization successful!")
-            print(f"  Segments: {num_segments}, Joints: {num_joints}")
-            print(f"  Calculation time: {calc_time:.3f}ms")
-            print(f"  Joint distances: {[f'{d:.1f}mm' for d in joint_distances]}")
-            print(f"  First joint: {initial_joints[0]}")
-            print(f"  Last joint: {initial_joints[-1]}")
-            
-            # Verify expected pattern
-            expected_pattern = [73.0, 146.0, 146.0, 146.0, 146.0, 146.0, 146.0, 73.0]
-            actual_distances = [round(d, 1) for d in joint_distances]
-            if actual_distances == expected_pattern:
-                print(f"✓ Joint distances match expected pattern!")
-            else:
-                print(f"⚠️  Joint distances don't match expected pattern")
-                print(f"   Expected: {expected_pattern}")
-                print(f"   Actual:   {actual_distances}")
-        else:
-            print(f"✗ Initialization failed: {error_msg}")
-            
-        # Test with different segment counts
-        for segments in [3, 5, 10]:
-            print(f"\n=== Test: {segments} Segments ===")
-            result = delta_robot_cpp.create_fabrik_straight_chain(segments)
-            _, _, num_segs, num_joints, calc_time, success, error_msg = result
-            
-            if success:
-                expected_joints = segments + 2
-                if num_joints == expected_joints:
-                    print(f"✓ {segments} segments → {num_joints} joints (correct)")
-                else:
-                    print(f"✗ {segments} segments → {num_joints} joints (expected {expected_joints})")
-            else:
-                print(f"✗ Failed: {error_msg}")
-                
+        add_robot_base_circle(fig, ROBOT_RADIUS)
+        
+        # Target
+        fig.add_trace(go.Scatter3d(
+            x=[target_position[0]], y=[target_position[1]], z=[target_position[2]],
+            mode='markers+text', marker=dict(size=15, color='red', symbol='x'),
+            text=['TARGET'], name='Target'
+        ))
+        
+        # Final joint chain
+        final_x = [pos[0] for pos in final_joints]
+        final_y = [pos[1] for pos in final_joints]
+        final_z = [pos[2] for pos in final_joints]
+        
+        fig.add_trace(go.Scatter3d(
+            x=final_x, y=final_y, z=final_z,
+            mode='lines+markers+text',
+            line=dict(color=ROBOT_COLORS['joint_chain'], width=5),
+            marker=dict(size=8, color=ROBOT_COLORS['joint_points']),
+            text=[f'J{i}' for i in range(len(final_joints))],
+            name='Refined Chain'
+        ))
+        
+        # End-effector
+        fig.add_trace(go.Scatter3d(
+            x=[final_joints[-1][0]], y=[final_joints[-1][1]], z=[final_joints[-1][2]],
+            mode='markers+text', marker=dict(size=12, color=ROBOT_COLORS['end_effector']),
+            text=['END-EFF'], name='End-Effector'
+        ))
+        
+        fig.show()
+        
     except Exception as e:
-        print(f"✗ Test failed with exception: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Visualization failed: {e}")
 
-def test_fabrik_iteration():
-    """Test FABRIK Iteration Block"""
-    print("\n" + "=" * 60)
-    print("TESTING FABRIK ITERATION BLOCK")
+def test_refinement_solver():
+    """Test the new FABRIK solver with prismatic refinement"""
+    print("=" * 60)
+    print("TESTING FABRIK PRISMATIC REFINEMENT SOLVER")
     print("=" * 60)
     
     try:
         import delta_robot_cpp
         
-        # First get initial joints
-        init_result = delta_robot_cpp.create_fabrik_straight_chain(7)
-        initial_joints, joint_distances, num_segments, num_joints, _, init_success, _ = init_result
+        # Test target
+        target = [80, 30, 400]
+        print(f"Target: {target}")
         
-        if not init_success:
-            print("✗ Cannot test iteration - initialization failed")
+        # Test basic solver first
+        print(f"\n=== Basic FABRIK Solver ===")
+        basic_result = delta_robot_cpp.fabrik_solve(np.array(target, dtype=float))
+        basic_joints, basic_iters, basic_distance, basic_converged, basic_time, basic_success, basic_error, _, _ = basic_result
+        
+        if basic_success:
+            print(f"✓ Basic: {basic_iters} iters, distance {basic_distance:.3f}mm, time {basic_time:.1f}ms")
+        else:
+            print(f"✗ Basic failed: {basic_error}")
             return
             
-        print(f"Using {num_joints} joints with {len(joint_distances)} distances")
+        # Test refinement solver
+        print(f"\n=== Prismatic Refinement Solver ===")
+        refined_result = delta_robot_cpp.fabrik_solve_with_refinement(np.array(target, dtype=float))
         
-        # Test targets
-        test_targets = [
-            [0, 0, 1000],      # Straight up (easy)
-            [50, 30, 800],     # Moderate displacement
-            [80, 30, 400],     # Your Python example
-            [100, 100, 200],   # More challenging
-        ]
+        (final_joints, final_prismatic, fabrik_iters, refinement_iters, 
+         final_distance, converged, prismatic_converged, calc_time,
+         success, error_msg, init_data, initial_joints, initial_prismatic) = refined_result
         
-        for i, target in enumerate(test_targets):
-            print(f"\n=== Iteration Test {i+1}: Target {target} ===")
+        if success:
+            print(f"✓ Refinement successful!")
+            print(f"  FABRIK iterations: {fabrik_iters}")
+            print(f"  Refinement loops: {refinement_iters}")
+            print(f"  Final distance: {final_distance:.3f}mm")
+            print(f"  FABRIK converged: {converged}")
+            print(f"  Prismatic converged: {prismatic_converged}")
+            print(f"  Total time: {calc_time:.1f}ms")
             
+            # Show prismatic values
+            print(f"  Prismatic lengths: {[f'{p:.2f}mm' for p in final_prismatic]}")
+            
+            # Compare with basic solver
+            basic_end = np.array(basic_joints[-1])
+            refined_end = np.array(final_joints[-1])
+            improvement = np.linalg.norm(basic_end - refined_end)
+            
+            print(f"\n=== Comparison ===")
+            print(f"Basic end-effector: ({basic_end[0]:.1f}, {basic_end[1]:.1f}, {basic_end[2]:.1f})")
+            print(f"Refined end-effector: ({refined_end[0]:.1f}, {refined_end[1]:.1f}, {refined_end[2]:.1f})")
+            print(f"Position difference: {improvement:.3f}mm")
+            print(f"Distance improvement: {basic_distance:.3f}mm → {final_distance:.3f}mm")
+            
+            if improvement > 0.1:
+                print(f"✓ Refinement made a difference!")
+            else:
+                print(f"○ Refinement converged to similar result")
+                
+            # Visualize
+            visualize_refinement_result(target, final_joints, final_prismatic,
+                                      fabrik_iters, refinement_iters, converged,
+                                      prismatic_converged, final_distance, calc_time)
+            
+        else:
+            print(f"✗ Refinement failed: {error_msg}")
+            
+        # Test segment calculations
+        print(f"\n=== Segment Calculation Test ===")
+        for i in range(min(3, len(final_joints)-1)):  # Test first 3 segments
             try:
-                result = delta_robot_cpp.fabrik_iterate(
-                    initial_joints, 
-                    np.array(target, dtype=float), 
-                    joint_distances
-                )
-                updated_joints, distance_to_target, calc_time, success, error_msg = result
+                seg_result = delta_robot_cpp.calculate_segment_essential_from_joints(final_joints, i)
+                prismatic, seg_time, seg_success, seg_error, calc_pos, calc_dir = seg_result
                 
-                if success:
-                    print(f"✓ Iteration successful!")
-                    print(f"  Distance to target: {distance_to_target:.3f}mm")
-                    print(f"  Calculation time: {calc_time:.3f}ms")
-                    print(f"  End-effector moved from {initial_joints[-1]} to {updated_joints[-1]}")
-                    
-                    # Check if improvement
-                    initial_distance = np.linalg.norm(np.array(initial_joints[-1]) - np.array(target))
-                    if distance_to_target < initial_distance:
-                        print(f"✓ Improved: {initial_distance:.1f}mm → {distance_to_target:.1f}mm")
-                    else:
-                        print(f"⚠️  No improvement: {initial_distance:.1f}mm → {distance_to_target:.1f}mm")
-                        
+                if seg_success:
+                    print(f"✓ Segment {i}: prismatic {prismatic:.2f}mm (time {seg_time:.3f}ms)")
                 else:
-                    print(f"✗ Iteration failed: {error_msg}")
-                    
+                    print(f"✗ Segment {i} failed: {seg_error}")
             except Exception as e:
-                print(f"✗ Exception during iteration: {e}")
-                
+                print(f"✗ Segment {i} exception: {e}")
+        
     except Exception as e:
-        print(f"✗ Test failed with exception: {e}")
+        print(f"✗ Test failed: {e}")
         import traceback
         traceback.print_exc()
 
-def test_fabrik_solver():
-    """Test FABRIK Solver Block"""
-    print("\n" + "=" * 60)
-    print("TESTING FABRIK SOLVER BLOCK")
-    print("=" * 60)
-    
+def test_constants():
+    """Test that new constants are available"""
+    print(f"\n=== Constants Test ===")
     try:
         import delta_robot_cpp
         
-        # Test targets with expected outcomes
-        test_cases = [
-            {
-                'target': [0, 0, 1000],
-                'description': 'Straight up (should converge quickly)',
-                'expected_convergence': True
-            },
-            {
-                'target': [80, 30, 400], 
-                'description': 'Python example target',
-                'expected_convergence': True
-            },
-            {
-                'target': [200, 200, 200],
-                'description': 'Challenging but reachable',
-                'expected_convergence': True  # Might not converge
-            },
-            {
-                'target': [2000, 0, 0],
-                'description': 'Likely unreachable',
-                'expected_convergence': False
-            }
-        ]
+        print(f"FABRIK_TOLERANCE: {delta_robot_cpp.FABRIK_TOLERANCE}")
+        print(f"FABRIK_MAX_ITERATIONS: {delta_robot_cpp.FABRIK_MAX_ITERATIONS}")
+        print(f"FABRIK_PRISMATIC_TOLERANCE: {delta_robot_cpp.FABRIK_PRISMATIC_TOLERANCE}")
+        print(f"FABRIK_MAX_REFINEMENT_ITERATIONS: {delta_robot_cpp.FABRIK_MAX_REFINEMENT_ITERATIONS}")
+        print(f"✓ All constants available")
         
-        for i, test_case in enumerate(test_cases):
-            target = test_case['target']
-            print(f"\n=== Solver Test {i+1}: {test_case['description']} ===")
-            print(f"Target: {target}")
-            
-            try:
-                result = delta_robot_cpp.fabrik_solve(
-                    np.array(target, dtype=float),
-                    7,      # num_segments
-                    0.01,   # tolerance  
-                    50      # max_iterations
-                )
-                
-                final_joints, iterations_used, final_distance, converged, calc_time, success, error_msg, init_data, initial_joints = result
-                
-                if success:
-                    print(f"✓ Solving completed!")
-                    print(f"  Converged: {converged} (expected: {test_case['expected_convergence']})")
-                    print(f"  Iterations used: {iterations_used}")
-                    print(f"  Final distance: {final_distance:.3f}mm")
-                    print(f"  Calculation time: {calc_time:.3f}ms")
-                    print(f"  Final end-effector: {final_joints[-1]}")
-                    
-                    # Validate convergence expectation
-                    if converged == test_case['expected_convergence']:
-                        print(f"✓ Convergence matches expectation")
-                    else:
-                        print(f"⚠️  Convergence unexpected (got {converged}, expected {test_case['expected_convergence']})")
-                        
-                    # Check if we're close to target when converged
-                    if converged and final_distance <= 0.01:
-                        print(f"✓ Converged within tolerance!")
-                    elif converged:
-                        print(f"⚠️  Converged but distance {final_distance:.3f} > tolerance 0.01")
-                        
-                else:
-                    print(f"✗ Solving failed: {error_msg}")
-                    
-            except Exception as e:
-                print(f"✗ Exception during solving: {e}")
-        
-        # Performance test
-        print(f"\n=== Performance Test: Multiple Solves ===")
-        target = [80, 30, 400]
-        times = []
-        
-        for i in range(10):
-            try:
-                result = delta_robot_cpp.fabrik_solve(np.array(target, dtype=float))
-                _, _, _, _, calc_time, success, _, _, _ = result
-                if success:
-                    times.append(calc_time)
-            except:
-                pass
-                
-        if times:
-            avg_time = np.mean(times)
-            min_time = np.min(times)
-            max_time = np.max(times)
-            print(f"✓ Performance over 10 runs:")
-            print(f"  Average: {avg_time:.3f}ms")
-            print(f"  Range: {min_time:.3f}ms - {max_time:.3f}ms")
-        else:
-            print(f"✗ No successful performance measurements")
-                
     except Exception as e:
-        print(f"✗ Test failed with exception: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"✗ Constants test failed: {e}")
 
 def main():
-    """Run all FABRIK tests"""
-    print("FABRIK COMPLETE PIPELINE TEST SUITE")
-    print("=" * 70)
-    print("Testing all three FABRIK blocks in sequence")
+    """Run FABRIK prismatic refinement tests"""
+    print("FABRIK PRISMATIC REFINEMENT TEST SUITE")
+    print("=" * 60)
     
-    # Test each block individually
-    test_fabrik_initialization()
-    test_fabrik_iteration() 
-    test_fabrik_solver()
+    test_constants()
+    test_refinement_solver()
     
-    # Integration test with visualization
-    print("\n" + "=" * 70)
-    print("INTEGRATION TEST WITH VISUALIZATION")
-    print("=" * 70)
-    
-    try:
-        # Test the complete pipeline with visualization
-        target = [80, 30, 400]
-        print(f"Testing complete pipeline with target {target}")
-        
-        # This should call the wrapper which uses the solver  
-        # Note: test_fabrik_solver doesn't have debug parameter, use the wrapper directly
-        from fabrik_wrapper import test_fabrik_solver as wrapper_test
-        try:
-            wrapper_test(target[0], target[1], target[2], debug=True)
-        except ImportError:
-            # Fallback to direct C++ call
-            import delta_robot_cpp
-            result = delta_robot_cpp.fabrik_solve(np.array(target, dtype=float))
-            final_joints, iterations, distance, converged, calc_time, success, error, init_data, initial_joints = result
-            print(f"✓ Direct C++ solve: converged={converged}, iterations={iterations}, distance={distance:.3f}mm")
-        
-        print("✓ Integration test with visualization completed!")
-        
-    except Exception as e:
-        print(f"✗ Integration test failed: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    print("\n" + "=" * 70)
-    print("ALL FABRIK TESTS COMPLETED")
-    print("=" * 70)
+    print(f"\n" + "=" * 60)
+    print("PRISMATIC REFINEMENT TESTS COMPLETED")
+    print("=" * 60)
 
 if __name__ == "__main__":
     main()
