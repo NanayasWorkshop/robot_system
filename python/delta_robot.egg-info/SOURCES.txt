@@ -4,6 +4,7 @@ cpp/blocks/fermat_block.cpp
 cpp/blocks/joint_state_block.cpp
 cpp/blocks/kinematics_block.cpp
 cpp/blocks/orientation_block.cpp
+cpp/blocks/segment_block.cpp
 python/delta_robot.egg-info/PKG-INFO
 python/delta_robot.egg-info/SOURCES.txt
 python/delta_robot.egg-info/dependency_links.txt

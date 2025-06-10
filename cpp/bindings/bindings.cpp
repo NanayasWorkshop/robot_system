@@ -7,6 +7,7 @@
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
 #include "../blocks/orientation_block.hpp"
+#include "../blocks/segment_block.hpp"
 
 namespace py = pybind11;
 
@@ -39,7 +40,6 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     // ===== KINEMATICS BLOCK =====
     m.def("calculate_kinematics", [](double x, double y, double z) {
         auto result = delta::KinematicsBlock::calculate(x, y, z);
-        // Return: point_H, point_G, HG_length, end_effector, calculation_time_ms, fermat_data
         auto fermat_tuple = std::make_tuple(result.fermat_data.z_A, result.fermat_data.z_B, result.fermat_data.z_C, 
                                            result.fermat_data.fermat_point, result.fermat_data.calculation_time_ms);
         return std::make_tuple(result.point_H, result.point_G, result.HG_length, 
@@ -49,7 +49,6 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     // ===== JOINT STATE BLOCK =====
     m.def("calculate_joint_state", [](double x, double y, double z) {
         auto result = delta::JointStateBlock::calculate(x, y, z);
-        // Return: prismatic_joint, roll_joint, pitch_joint, calculation_time_ms, fermat_data
         auto fermat_tuple = std::make_tuple(result.fermat_data.z_A, result.fermat_data.z_B, result.fermat_data.z_C,
                                            result.fermat_data.fermat_point, result.fermat_data.calculation_time_ms);
         return std::make_tuple(result.prismatic_joint, result.roll_joint, result.pitch_joint,
@@ -58,17 +57,11 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     
     // ===== ORIENTATION BLOCK =====
     m.def("calculate_orientation", [](double x, double y, double z) {
-        // Get kinematics first (internal to C++)
         auto kinematics_result = delta::KinematicsBlock::calculate(x, y, z);
-        
-        // Calculate orientation
         auto result = delta::OrientationBlock::calculate(kinematics_result);
         
-        // Return simple tuple like other blocks
         auto final_frame_tuple = std::make_tuple(result.final_frame.origin, result.final_frame.u_axis, 
                                                 result.final_frame.v_axis, result.final_frame.w_axis);
-        
-        // Build complete kinematics tuple (matching kinematics block output format)
         auto fermat_tuple = std::make_tuple(kinematics_result.fermat_data.z_A, kinematics_result.fermat_data.z_B, 
                                            kinematics_result.fermat_data.z_C, kinematics_result.fermat_data.fermat_point, 
                                            kinematics_result.fermat_data.calculation_time_ms);
@@ -80,9 +73,66 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
                               result.transformation_matrix, result.calculation_time_ms, kinematics_tuple);
     }, "Calculate orientation from direction vector");
     
-    // ===== BLOCKS (FUTURE) =====
-    // m.def("calculate_workspace", ...)
+    // ===== SEGMENT BLOCK - ESSENTIAL INTERFACE =====
+    m.def("calculate_segment_essential", [](double x, double y, double z, 
+                                           double prev_x = 0.0, double prev_y = 0.0, double prev_z = 1.0) {
+        auto result = delta::SegmentBlock::calculate_essential(
+            Eigen::Vector3d(x, y, z), 
+            Eigen::Vector3d(prev_x, prev_y, prev_z)
+        );
+        return std::make_tuple(result.prismatic_length, result.calculation_time_ms, 
+                              result.calculation_successful, result.error_message);
+    }, "Calculate segment prismatic length (direction-based)",
+       py::arg("x"), py::arg("y"), py::arg("z"), 
+       py::arg("prev_x") = 0.0, py::arg("prev_y") = 0.0, py::arg("prev_z") = 1.0);
     
-    // ===== ADVANCED (FUTURE) =====
-    // m.def("solve_fabrik", ...)
+    m.def("calculate_segment_essential_from_joints", [](const std::vector<Eigen::Vector3d>& joint_positions, int segment_index) {
+        auto result = delta::SegmentBlock::calculate_essential_from_joints(joint_positions, segment_index);
+        
+        // Return essential data + J→S conversion info
+        py::object calc_seg_pos = result.calculated_segment_position.has_value() ? 
+            py::cast(result.calculated_segment_position.value()) : py::none();
+        py::object calc_dir = result.calculated_direction.has_value() ? 
+            py::cast(result.calculated_direction.value()) : py::none();
+        
+        return std::make_tuple(result.prismatic_length, result.calculation_time_ms, 
+                              result.calculation_successful, result.error_message,
+                              calc_seg_pos, calc_dir);
+    }, "Calculate segment prismatic length from FABRIK joints (with J→S conversion)",
+       py::arg("joint_positions"), py::arg("segment_index"));
+    
+    // ===== SEGMENT BLOCK - COMPLETE INTERFACE (for detailed analysis only) =====
+    m.def("calculate_segment_complete", [](double x, double y, double z,
+                                          double prev_x = 0.0, double prev_y = 0.0, double prev_z = 1.0) {
+        auto result = delta::SegmentBlock::calculate_complete(
+            Eigen::Vector3d(x, y, z), 
+            Eigen::Vector3d(prev_x, prev_y, prev_z)
+        );
+        
+        // Just return success status for complete mode - detailed data available in C++ if needed
+        return std::make_tuple(result.prismatic_length, result.calculation_time_ms, 
+                              result.calculation_successful, result.error_message,
+                              result.kinematics_data.has_value(), 
+                              result.joint_state_data.has_value(),
+                              result.orientation_data.has_value());
+    }, "Calculate segment with full analysis (direction-based)",
+       py::arg("x"), py::arg("y"), py::arg("z"), 
+       py::arg("prev_x") = 0.0, py::arg("prev_y") = 0.0, py::arg("prev_z") = 1.0);
+    
+    m.def("calculate_segment_complete_from_joints", [](const std::vector<Eigen::Vector3d>& joint_positions, int segment_index) {
+        auto result = delta::SegmentBlock::calculate_complete_from_joints(joint_positions, segment_index);
+        
+        py::object calc_seg_pos = result.calculated_segment_position.has_value() ? 
+            py::cast(result.calculated_segment_position.value()) : py::none();
+        py::object calc_dir = result.calculated_direction.has_value() ? 
+            py::cast(result.calculated_direction.value()) : py::none();
+        
+        return std::make_tuple(result.prismatic_length, result.calculation_time_ms, 
+                              result.calculation_successful, result.error_message,
+                              calc_seg_pos, calc_dir,
+                              result.kinematics_data.has_value(), 
+                              result.joint_state_data.has_value(),
+                              result.orientation_data.has_value());
+    }, "Calculate segment with full analysis from FABRIK joints (with J→S conversion)",
+       py::arg("joint_positions"), py::arg("segment_index"));
 }

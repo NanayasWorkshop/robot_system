@@ -1,0 +1,110 @@
+# segment_block.info.yml
+name: "Segment Block"
+description: "High-level segment processing with coordinate transformation and J→S conversion for chain calculations"
+version: "2.0"
+category: "aggregate_block"
+level: 3
+
+inputs:
+  - name: "current_direction"
+    type: "Eigen::Vector3d"
+    description: "Direction vector for current segment (direction-based methods)"
+    constraints: "Non-zero vector, positive Z after transformation"
+  - name: "previous_direction"
+    type: "Eigen::Vector3d"
+    description: "Direction vector from previous segment (direction-based methods)"
+    constraints: "Non-zero vector, defaults to Z+ upward (0,0,1)"
+  - name: "joint_positions"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "FABRIK joint positions for J→S conversion (joint-based methods)"
+    constraints: "Minimum segment_index+3 positions required"
+  - name: "segment_index"
+    type: "int"
+    description: "Which segment to calculate (0=S1, 1=S2, 2=S3, etc.)"
+    constraints: "Non-negative integer, must have sufficient joint positions"
+
+outputs:
+  - name: "prismatic_length"
+    type: "double"
+    description: "Calculated prismatic length for segment"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Total calculation time including all called blocks"
+  - name: "calculation_successful"
+    type: "bool"
+    description: "Success flag for error handling"
+  - name: "error_message"
+    type: "std::string"
+    description: "Error description if calculation failed"
+  - name: "calculated_segment_position"
+    type: "std::optional<Eigen::Vector3d>"
+    description: "S-point calculated from J-points (joint-based methods only)"
+  - name: "calculated_direction"
+    type: "std::optional<Eigen::Vector3d>"
+    description: "Direction vector derived from S-point (joint-based methods only)"
+  - name: "previous_segment_position"
+    type: "std::optional<Eigen::Vector3d>"
+    description: "Previous S-point used for transformation (joint-based methods only)"
+  - name: "detailed_data"
+    type: "optional composite"
+    description: "Complete block results (complete mode only)"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "blocks/fermat_block.hpp"
+  - "blocks/kinematics_block.hpp"
+  - "blocks/joint_state_block.hpp"
+  - "blocks/orientation_block.hpp"
+  - "Eigen/Dense"
+
+internal_blocks:
+  - "FermatBlock (essential mode)"
+  - "KinematicsBlock (complete mode)"
+  - "JointStateBlock (complete mode)"
+  - "OrientationBlock (complete mode)"
+
+performance:
+  typical_time_range: "0.1-2.0ms (depending on mode)"
+
+interfaces:
+  direction_based:
+    - "calculate_essential(current_direction, previous_direction)"
+    - "calculate_complete(current_direction, previous_direction)"
+    description: "Direct segment direction processing (for external sensors, etc.)"
+  joint_based:
+    - "calculate_essential_from_joints(joint_positions, segment_index)"
+    - "calculate_complete_from_joints(joint_positions, segment_index)"
+    description: "FABRIK joint position processing with J→S conversion"
+
+algorithm:
+  direction_based:
+    - "Check if coordinate transformation needed"
+    - "Calculate Rodrigues rotation matrix if needed"
+    - "Apply transformation to current direction"
+    - "Validate positive Z component"
+    - "Call appropriate underlying blocks based on mode"
+    - "Package results with error handling"
+  joint_based:
+    - "Validate joint positions and segment index"
+    - "Convert J-points to S-point using cascading distance logic"
+    - "Calculate direction vectors from S-points"
+    - "Call direction-based calculation pipeline"
+    - "Add J→S conversion data to result"
+
+j_to_s_conversion:
+  formula: "Si = Ji + direction(Ji→Ji+1) × distance(Ji-Si-1)"
+  base_case: "S1 = J1 + direction(J1→J2) × distance(J1-J0)"
+  description: "Sequential calculation where each S-point depends on previous S-point"
+
+notes:
+  - "Level 3 aggregate block - high-level interface for chain processing"
+  - "Handles sequential coordinate transformations for multi-segment chains"
+  - "Provides J→S conversion for FABRIK integration"
+  - "Essential mode optimized for FABRIK performance requirements"
+  - "Complete mode provides full analysis for visualization/debugging"
+  - "Direction-based methods for direct S-point inputs (sensors, etc.)"
+  - "Joint-based methods for FABRIK joint position inputs"
+  - "Stateless design - no internal state between calls"
+  - "Error handling via result flags, not exceptions"
+  - "Exposes S-point conversion data for debugging and validation"
