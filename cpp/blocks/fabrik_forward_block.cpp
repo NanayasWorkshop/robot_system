@@ -31,10 +31,10 @@ FabrikForwardResult FabrikForwardBlock::calculate(const std::vector<Eigen::Vecto
     }
 }
 
-std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::vector<Eigen::Vector3d>& original_positions,
+std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::vector<Eigen::Vector3d>& joint_positions,
                                                                     const Eigen::Vector3d& target_position,
                                                                     std::vector<double>& recalculated_lengths) {
-    std::vector<Eigen::Vector3d> updated_positions = original_positions;
+    std::vector<Eigen::Vector3d> updated_positions = joint_positions;
     int num_joints = static_cast<int>(updated_positions.size());
     int total_segments = num_joints - 1;
     
@@ -47,25 +47,24 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
     
     // Step 2: Work forward from joint 1 to end-effector
     for (int i = 1; i < num_joints; ++i) {
-        // Previous joint already positioned in this forward pass
-        const Eigen::Vector3d& J_prev_prime = updated_positions[i - 1];
+        // J_prev: Previous joint already positioned in this forward pass
+        const Eigen::Vector3d& J_prev = updated_positions[i - 1];
         
-        // Original position of current joint before this pass
-        const Eigen::Vector3d& J_current_original = original_positions[i];
+        // J_current_original: Where this joint WAS before this pass
+        const Eigen::Vector3d& J_current_original = joint_positions[i];
         
-        // Calculate desired direction: from J_prev_prime toward J_current_original
-        Eigen::Vector3d desired_direction = J_current_original - J_prev_prime;
-        
-        // FIXED: Calculate new segment length using complete joint chain with SegmentBlock
-        // This preserves the full transformation context that was lost in the original implementation
+        // Calculate new segment length using complete joint chain with SegmentBlock
         double new_segment_length = calculate_new_segment_length_from_complete_chain(
-            original_positions,  // Complete original chain for full context
-            i - 1,              // Segment index (0-based: i=1 → segment 0, i=2 → segment 1, etc.)
-            total_segments      // Total number of segments
+            joint_positions,  // Use original chain for full context
+            i - 1,           // Segment index (0-based: i=1 → segment 0, i=2 → segment 1, etc.)
+            total_segments   // Total number of segments
         );
         
         // Store the recalculated length
         recalculated_lengths.push_back(new_segment_length);
+        
+        // Calculate desired direction: from J_prev toward J_current_original
+        Eigen::Vector3d desired_direction = J_current_original - J_prev;
         
         // Special case: First joint after base (J1) must go straight up in Z+
         Eigen::Vector3d final_direction;
@@ -79,23 +78,23 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
         // Place joint at new segment length distance
         if (final_direction.norm() > 1e-10) {
             Eigen::Vector3d placement_direction = final_direction.normalized();
-            updated_positions[i] = J_prev_prime + placement_direction * new_segment_length;
+            updated_positions[i] = J_prev + placement_direction * new_segment_length;
         } else {
             // Fallback direction if calculation fails
             Eigen::Vector3d fallback_direction;
             if (i + 1 < num_joints) {
                 // Point toward next joint
-                fallback_direction = original_positions[i + 1] - J_prev_prime;
+                fallback_direction = joint_positions[i + 1] - J_prev;
             } else {
                 // Last joint - point toward target
-                fallback_direction = target_position - J_prev_prime;
+                fallback_direction = target_position - J_prev;
             }
             
             if (fallback_direction.norm() < 1e-10) {
                 fallback_direction = Eigen::Vector3d(0, 0, 1); // Ultimate fallback
             }
             
-            updated_positions[i] = J_prev_prime + fallback_direction.normalized() * new_segment_length;
+            updated_positions[i] = J_prev + fallback_direction.normalized() * new_segment_length;
         }
     }
     
@@ -105,8 +104,7 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
 double FabrikForwardBlock::calculate_new_segment_length_from_complete_chain(const std::vector<Eigen::Vector3d>& complete_joint_chain,
                                                                            int segment_index, int total_segments) {
     try {
-        // FIXED: Use SegmentBlock with complete joint chain context
-        // This preserves all transformations and J→S conversion context
+        // Use SegmentBlock with complete joint chain context
         SegmentResult segment_result = SegmentBlock::calculate_essential_from_joints(
             complete_joint_chain, segment_index);
         
@@ -157,7 +155,7 @@ Eigen::Vector3d FabrikForwardBlock::apply_cone_constraint_if_needed(const Eigen:
         return desired_direction;
     }
     
-    // Cone setup for forward pass (different from backward)
+    // Cone setup for forward pass
     const Eigen::Vector3d& J_apex_cone = joint_positions[joint_index - 1];    // Previous joint is apex
     const Eigen::Vector3d& J_direction_ref = joint_positions[joint_index - 2]; // Joint before that is reference
     

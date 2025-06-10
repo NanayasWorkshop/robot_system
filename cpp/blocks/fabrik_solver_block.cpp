@@ -24,40 +24,38 @@ FabrikSolverResult FabrikSolverBlock::solve(
                 throw std::runtime_error("Chain initialization failed");
             }
             
-            std::vector<Eigen::Vector3d> joint_positions = init_result.joint_positions;
+            // Current joint positions - this gets updated each iteration
+            std::vector<Eigen::Vector3d> current_joints = init_result.joint_positions;
             
             // Step 2: Calculate initial segment lengths  
-            std::vector<double> segment_lengths = calculate_initial_segment_lengths(joint_positions);
+            std::vector<double> segment_lengths = calculate_initial_segment_lengths(current_joints);
             
-            // Step 3: Convergence loop (always end on forward pass)
+            // Step 3: Convergence loop
             int iteration = 0;
-            double current_error = calculate_distance_to_target(joint_positions, target_position);
+            double current_error = calculate_distance_to_target(current_joints, target_position);
             
             // Check if already at target
             if (current_error <= tolerance) {
-                return FabrikSolverResult(joint_positions, joint_positions.back(), 
+                return FabrikSolverResult(current_joints, current_joints.back(), 
                                         true, current_error, 0, solve_time_ms);
             }
             
             while (iteration < max_iterations) {
                 
-                // Backward pass (end-effector → target)
+                // Backward pass: target → base
                 FabrikBackwardResult backward_result = FabrikBackwardBlock::calculate(
-                    joint_positions, target_position, segment_lengths);
+                    current_joints, target_position, segment_lengths);
                 
-                // FIXED: Update chain state with backward result (like working FABRIK)
-                joint_positions = backward_result.updated_joint_positions;
-                
-                // Forward pass (base → origin, recalculate lengths)
+                // Forward pass: base → end (recalculates segment lengths)
                 FabrikForwardResult forward_result = FabrikForwardBlock::calculate(
-                    joint_positions, target_position);
+                    backward_result.updated_joint_positions, target_position);
                 
-                // FIXED: Update chain state with forward result (like working FABRIK)
-                joint_positions = forward_result.updated_joint_positions;     // Base always at origin after forward
-                segment_lengths = forward_result.recalculated_segment_lengths; // CRITICAL: Use updated lengths!
+                // UPDATE: Use forward pass output as new input for next iteration
+                current_joints = forward_result.updated_joint_positions;
+                segment_lengths = forward_result.recalculated_segment_lengths;
                 
-                // Check convergence (after forward pass only)
-                current_error = calculate_distance_to_target(joint_positions, target_position);
+                // Check convergence
+                current_error = calculate_distance_to_target(current_joints, target_position);
                 iteration++;
                 
                 // Exit if converged
@@ -68,9 +66,9 @@ FabrikSolverResult FabrikSolverBlock::solve(
             
             // Package results
             bool converged = (current_error <= tolerance);
-            Eigen::Vector3d achieved_position = joint_positions.back();
+            Eigen::Vector3d achieved_position = current_joints.back();
             
-            return FabrikSolverResult(joint_positions, achieved_position, converged, 
+            return FabrikSolverResult(current_joints, achieved_position, converged, 
                                     current_error, iteration, solve_time_ms);
             
         } catch (const std::exception& e) {

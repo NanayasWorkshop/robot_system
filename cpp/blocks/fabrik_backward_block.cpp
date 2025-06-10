@@ -30,10 +30,10 @@ FabrikBackwardResult FabrikBackwardBlock::calculate(const std::vector<Eigen::Vec
     }
 }
 
-std::vector<Eigen::Vector3d> FabrikBackwardBlock::single_backward_pass(const std::vector<Eigen::Vector3d>& original_positions,
+std::vector<Eigen::Vector3d> FabrikBackwardBlock::single_backward_pass(const std::vector<Eigen::Vector3d>& joint_positions,
                                                                       const Eigen::Vector3d& target_position,
                                                                       const std::vector<double>& segment_lengths) {
-    std::vector<Eigen::Vector3d> updated_positions = original_positions;
+    std::vector<Eigen::Vector3d> updated_positions = joint_positions;
     int num_joints = static_cast<int>(updated_positions.size());
     
     if (num_joints == 0) {
@@ -45,47 +45,47 @@ std::vector<Eigen::Vector3d> FabrikBackwardBlock::single_backward_pass(const std
     
     // Step 2: Work backwards from second-to-last joint to base
     for (int i = num_joints - 2; i >= 0; --i) {
-        // J_next_prime: The joint already positioned in this backward pass
-        const Eigen::Vector3d& J_next_prime = updated_positions[i + 1];
+        // J_next: The joint already positioned in this backward pass
+        const Eigen::Vector3d& J_next = updated_positions[i + 1];
         
-        // J_current_original: The original position of current joint before this pass
-        const Eigen::Vector3d& J_current_original = original_positions[i];
+        // J_current_original: Where this joint WAS before this pass
+        const Eigen::Vector3d& J_current_original = joint_positions[i];
         
         // Get segment length for this segment
         double segment_length = segment_lengths[i];
         
         if (segment_length < 1e-10) {
             // Zero length segment - place at same position
-            updated_positions[i] = J_next_prime;
+            updated_positions[i] = J_next;
             continue;
         }
         
-        // Calculate desired direction: from J_next_prime toward J_current_original
-        Eigen::Vector3d desired_direction = J_current_original - J_next_prime;
+        // Calculate desired direction: from J_next toward J_current_original
+        Eigen::Vector3d desired_direction = J_current_original - J_next;
         
         // Apply cone constraint if needed (for spherical joints)
         Eigen::Vector3d final_direction = apply_cone_constraint_if_needed(desired_direction, updated_positions, i);
         
-        // Place joint i at segment_length distance from J_next_prime in final direction
+        // Place joint i at segment_length distance from J_next in final direction
         if (final_direction.norm() > 1e-10) {
             Eigen::Vector3d placement_direction = final_direction.normalized();
-            updated_positions[i] = J_next_prime + placement_direction * segment_length;
+            updated_positions[i] = J_next + placement_direction * segment_length;
         } else {
             // Fallback direction if calculation fails
             Eigen::Vector3d fallback_direction;
             if (i > 0) {
                 // Point toward previous joint
-                fallback_direction = original_positions[i-1] - J_next_prime;
+                fallback_direction = joint_positions[i-1] - J_next;
             } else {
                 // Base joint - point toward origin
-                fallback_direction = Eigen::Vector3d(0, 0, 0) - J_next_prime;
+                fallback_direction = Eigen::Vector3d(0, 0, 0) - J_next;
             }
             
             if (fallback_direction.norm() < 1e-10) {
                 fallback_direction = Eigen::Vector3d(0, 0, -1); // Ultimate fallback
             }
             
-            updated_positions[i] = J_next_prime + fallback_direction.normalized() * segment_length;
+            updated_positions[i] = J_next + fallback_direction.normalized() * segment_length;
         }
     }
     
@@ -95,8 +95,7 @@ std::vector<Eigen::Vector3d> FabrikBackwardBlock::single_backward_pass(const std
 Eigen::Vector3d FabrikBackwardBlock::apply_cone_constraint_if_needed(const Eigen::Vector3d& desired_direction,
                                                                     const std::vector<Eigen::Vector3d>& joint_positions,
                                                                     int joint_index) {
-    // Apply cone constraint for spherical joints (following your old logic)
-    // Constraint applies when we have enough joints to define cone axis
+    // Apply cone constraint for spherical joints
     int num_joints = static_cast<int>(joint_positions.size());
     
     // Check if we can apply cone constraint
@@ -107,7 +106,7 @@ Eigen::Vector3d FabrikBackwardBlock::apply_cone_constraint_if_needed(const Eigen
         return desired_direction;
     }
     
-    // Cone setup (following your old algorithm)
+    // Cone setup
     const Eigen::Vector3d& J_apex_cone = joint_positions[joint_index + 1];
     const Eigen::Vector3d& J_direction_ref = joint_positions[joint_index + 2];
     

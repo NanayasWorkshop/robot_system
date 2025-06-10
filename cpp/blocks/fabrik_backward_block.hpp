@@ -1,3 +1,5 @@
+// fabrik_backward_block.hpp - Clean Version
+
 #ifndef DELTA_BLOCKS_FABRIK_BACKWARD_BLOCK_HPP
 #define DELTA_BLOCKS_FABRIK_BACKWARD_BLOCK_HPP
 
@@ -20,14 +22,14 @@ struct FabrikBackwardResult {
 
 class FabrikBackwardBlock {
 public:
-    // Main interface: single backward pass from target to base with cone constraints
+    // Single backward pass from target to base with cone constraints
     static FabrikBackwardResult calculate(const std::vector<Eigen::Vector3d>& joint_positions,
                                          const Eigen::Vector3d& target_position,
                                          const std::vector<double>& segment_lengths);
 
 private:
-    // Single backward pass (extracted from your old single_backward_iteration)
-    static std::vector<Eigen::Vector3d> single_backward_pass(const std::vector<Eigen::Vector3d>& original_positions,
+    // Single backward pass implementation
+    static std::vector<Eigen::Vector3d> single_backward_pass(const std::vector<Eigen::Vector3d>& joint_positions,
                                                             const Eigen::Vector3d& target_position,
                                                             const std::vector<double>& segment_lengths);
     
