@@ -1,0 +1,102 @@
+# fabrik_forward_block.info.yml
+name: "FABRIK Forward Block"
+description: "Single forward pass from base to end with dynamic segment length recalculation for FABRIK algorithm"
+version: "1.0"
+category: "composite_block"
+level: 2
+
+inputs:
+  - name: "joint_positions"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Joint positions after backward pass (base drifted away from origin)"
+    constraints: "Non-empty array of 3D positions"
+  - name: "target_position"
+    type: "Eigen::Vector3d"
+    description: "Target position for direction reference and drift calculation"
+    constraints: "Any 3D position"
+
+outputs:
+  - name: "updated_joint_positions"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Joint positions with base fixed at origin"
+  - name: "recalculated_segment_lengths"
+    type: "std::vector<double>"
+    description: "NEW segment lengths for next FABRIK iteration"
+  - name: "distance_to_target"
+    type: "double"
+    description: "Distance from end-effector to target (indicates target drift)"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "blocks/cone_constraint_block.hpp"
+  - "blocks/segment_block.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "MIN_HEIGHT"
+  - "MOTOR_LIMIT"
+  - "WORKING_HEIGHT"
+  - "SPHERICAL_JOINT_CONE_ANGLE_RAD"
+
+internal_blocks:
+  - "ConeConstraintBlock"
+  - "SegmentBlock"
+
+performance:
+  typical_time_range: "0.2-1.0ms (includes SegmentBlock calculations per joint)"
+
+algorithm:
+  forward_pass_with_recalculation:
+    - "Fix base joint at origin (0,0,0)"
+    - "Work forward from joint 1 to end-effector:"
+    - "  - Extract direction pairs from current chain state"
+    - "  - Use SegmentBlock to calculate NEW prismatic length with coordinate transformation"
+    - "  - Convert prismatic to FABRIK segment length (first/last = half-length pattern)"
+    - "  - Apply cone constraints for spherical joints (forward reference points)"
+    - "  - Place joint at NEW segment length distance"
+    - "  - Special case: J1 forced straight up in Z+ direction"
+  
+  dynamic_segment_recalculation:
+    - "For each joint placement, calls SegmentBlock::calculate_essential(current_dir, previous_dir)"
+    - "Handles coordinate transformation from chain directions to Z+ reference frame"
+    - "Converts resulting prismatic length to appropriate FABRIK segment length"
+    - "First segment: WORKING_HEIGHT + h_to_g/2"
+    - "Middle segments: h_to_g/2 + 2*WORKING_HEIGHT + h_to_g/2"
+    - "Last segment: h_to_g/2 + WORKING_HEIGHT"
+
+  cone_constraints_forward:
+    - "Applied when joint i-1 and joint i-2 exist (different from backward)"
+    - "Cone apex at joint i-1, axis from joint i-2 toward joint i-1"
+    - "Uses 120° spherical joint constraint via ConeConstraintBlock"
+
+iteration_behavior:
+  purpose: "Fixes base position while maintaining chain structure"
+  base_fixing: "Forces base back to origin (0,0,0)"
+  side_effect: "End-effector drifts away from target (resolved by next backward iteration)"
+  segment_updates: "Provides new segment lengths incorporating current chain geometry"
+
+fabrik_integration:
+  position: "Second step in FABRIK cycle (after backward, before next backward)"
+  input_source: "Joint positions from FabrikBackwardBlock"
+  output_usage: "updated_joint_positions fed to next FabrikBackwardBlock iteration"
+  length_output: "recalculated_segment_lengths used by next backward iteration"
+  convergence_role: "Alternates with backward until both base and target constraints satisfied"
+
+segment_block_integration:
+  usage: "Calls SegmentBlock::calculate_essential for each joint placement"
+  coordinate_transform: "SegmentBlock handles transformation from chain directions to Z+ reference"
+  prismatic_extraction: "Gets prismatic length from direction pair analysis"
+  length_conversion: "Converts prismatic to FABRIK using robot constants and segment position rules"
+
+notes:
+  - "Level 2 composite block - uses both ConeConstraintBlock and SegmentBlock"
+  - "Most complex FABRIK block due to dynamic segment length recalculation"
+  - "Implements the critical segment length update mechanism for FABRIK convergence"
+  - "J1 special case maintains robot's straight-up constraint"
+  - "Forward cone constraints use different reference points than backward"
+  - "Target drift is expected behavior - resolved by next backward iteration"
+  - "Integrates robot kinematics (via SegmentBlock) into FABRIK geometry"
