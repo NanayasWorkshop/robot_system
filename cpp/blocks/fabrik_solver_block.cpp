@@ -47,11 +47,14 @@ FabrikSolverResult FabrikSolverBlock::solve(
                 FabrikBackwardResult backward_result = FabrikBackwardBlock::calculate(
                     current_joints, target_position, segment_lengths);
                 
-                // Forward pass: base → end (with FIXED segment lengths)
-                FabrikForwardResult forward_result = FabrikForwardBlock::calculate(
-                    backward_result.updated_joint_positions, target_position, segment_lengths);
+                // *** FIX: Update current_joints immediately after backward pass ***
+                current_joints = backward_result.updated_joint_positions;
                 
-                // UPDATE: Use forward pass output as new input for next iteration
+                // Forward pass: base → end (using UPDATED joint positions from backward pass)
+                FabrikForwardResult forward_result = FabrikForwardBlock::calculate(
+                    current_joints, target_position, segment_lengths);
+                
+                // *** FIX: Update current_joints immediately after forward pass ***
                 current_joints = forward_result.updated_joint_positions;
                 
                 // Check convergence

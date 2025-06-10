@@ -1,4 +1,4 @@
-// fabrik_backward_block.hpp - Clean Version
+// fabrik_backward_block.hpp - Updated with fixed signatures
 
 #ifndef DELTA_BLOCKS_FABRIK_BACKWARD_BLOCK_HPP
 #define DELTA_BLOCKS_FABRIK_BACKWARD_BLOCK_HPP
@@ -33,9 +33,10 @@ private:
                                                             const Eigen::Vector3d& target_position,
                                                             const std::vector<double>& segment_lengths);
     
-    // Apply cone constraint for spherical joints
+    // *** UPDATED: Apply cone constraint with separate original/updated position arrays ***
     static Eigen::Vector3d apply_cone_constraint_if_needed(const Eigen::Vector3d& desired_direction,
-                                                          const std::vector<Eigen::Vector3d>& joint_positions,
+                                                          const std::vector<Eigen::Vector3d>& original_positions,
+                                                          const std::vector<Eigen::Vector3d>& updated_positions,
                                                           int joint_index);
     
     // Calculate distance from end-effector to base

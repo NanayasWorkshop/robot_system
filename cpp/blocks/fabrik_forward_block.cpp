@@ -36,7 +36,10 @@ FabrikForwardResult FabrikForwardBlock::calculate(const std::vector<Eigen::Vecto
 std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::vector<Eigen::Vector3d>& joint_positions,
                                                                     const Eigen::Vector3d& target_position,
                                                                     const std::vector<double>& segment_lengths) {
-    std::vector<Eigen::Vector3d> updated_positions = joint_positions;
+    // *** FIX: Create separate arrays for input (NEVER modified) and output (working copy) ***
+    const std::vector<Eigen::Vector3d>& original_positions = joint_positions;  // FROZEN reference - never touch!
+    std::vector<Eigen::Vector3d> updated_positions = joint_positions;          // Working copy - modify freely
+    
     int num_joints = static_cast<int>(updated_positions.size());
     
     if (num_joints == 0) {
@@ -48,11 +51,11 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
     
     // Step 2: Work forward from joint 1 to end-effector
     for (int i = 1; i < num_joints; ++i) {
-        // J_prev: Previous joint already positioned in this forward pass
+        // J_prev: Previous joint already positioned in this forward pass (UPDATED position)
         const Eigen::Vector3d& J_prev = updated_positions[i - 1];
         
-        // J_current_original: Where this joint WAS before this pass
-        const Eigen::Vector3d& J_current_original = joint_positions[i];
+        // *** FIX: J_current_original - ALWAYS use ORIGINAL input position ***
+        const Eigen::Vector3d& J_current_original = original_positions[i];  // ← NEVER use updated_positions[i]!
         
         // Use FIXED segment length (no recalculation)
         double current_segment_length = segment_lengths[i - 1];
@@ -66,7 +69,7 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
             final_direction = Eigen::Vector3d(0, 0, 1); // Force straight up
         } else {
             // Apply cone constraint if needed
-            final_direction = apply_cone_constraint_if_needed(desired_direction, updated_positions, i);
+            final_direction = apply_cone_constraint_if_needed(desired_direction, original_positions, updated_positions, i);
         }
         
         // Place joint at fixed segment length distance
@@ -77,8 +80,8 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
             // Fallback direction if calculation fails
             Eigen::Vector3d fallback_direction;
             if (i + 1 < num_joints) {
-                // Point toward next joint
-                fallback_direction = joint_positions[i + 1] - J_prev;
+                // Point toward next joint (use ORIGINAL position)
+                fallback_direction = original_positions[i + 1] - J_prev;
             } else {
                 // Last joint - point toward target
                 fallback_direction = target_position - J_prev;
@@ -96,7 +99,8 @@ std::vector<Eigen::Vector3d> FabrikForwardBlock::single_forward_pass(const std::
 }
 
 Eigen::Vector3d FabrikForwardBlock::apply_cone_constraint_if_needed(const Eigen::Vector3d& desired_direction,
-                                                                   const std::vector<Eigen::Vector3d>& joint_positions,
+                                                                   const std::vector<Eigen::Vector3d>& original_positions,
+                                                                   const std::vector<Eigen::Vector3d>& updated_positions,
                                                                    int joint_index) {
     // Apply cone constraint for spherical joints (forward version)
     // Check if we can apply cone constraint
@@ -107,9 +111,9 @@ Eigen::Vector3d FabrikForwardBlock::apply_cone_constraint_if_needed(const Eigen:
         return desired_direction;
     }
     
-    // Cone setup for forward pass
-    const Eigen::Vector3d& J_apex_cone = joint_positions[joint_index - 1];    // Previous joint is apex
-    const Eigen::Vector3d& J_direction_ref = joint_positions[joint_index - 2]; // Joint before that is reference
+    // *** FIX: Use UPDATED position for apex (already placed), ORIGINAL for direction reference ***
+    const Eigen::Vector3d& J_apex_cone = updated_positions[joint_index - 1];    // Already placed in this pass
+    const Eigen::Vector3d& J_direction_ref = original_positions[joint_index - 2]; // Use ORIGINAL reference
     
     // Cone axis points from reference point toward apex
     Eigen::Vector3d cone_axis = J_apex_cone - J_direction_ref;
