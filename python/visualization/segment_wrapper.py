@@ -9,14 +9,17 @@ import plotly.graph_objects as go
 
 import delta_robot_cpp
 
-def visualize_all_segments_and_joints(joint_positions: list, max_segments: int = 3) -> None:
+def visualize_all_segments_and_joints(joint_positions: list) -> None:
     """Visualize all J points and calculated S points in a single comprehensive plot"""
     
     # Get constants from C++
     ROBOT_RADIUS = delta_robot_cpp.ROBOT_RADIUS
     
+    # Calculate maximum possible segments (num_joints - 1)
+    max_possible_segments = len(joint_positions) - 1
+    
     # Create base figure with coordinate system
-    fig = create_base_3d_figure(f"Complete J→S Conversion Visualization - {len(joint_positions)} Joints, {max_segments} Segments")
+    fig = create_base_3d_figure(f"Complete J→S Conversion Visualization - {len(joint_positions)} Joints, {max_possible_segments} Segments")
     
     # Add robot base circle for reference
     add_robot_base_circle(fig, ROBOT_RADIUS)
@@ -38,14 +41,29 @@ def visualize_all_segments_and_joints(joint_positions: list, max_segments: int =
         name='Joint Chain'
     ))
     
-    # Calculate and plot S points for multiple segments
-    s_points = []
+    # Add S0 base point at J0 (start of S-point chain)
+    s0_base_point = joint_positions[0]  # S0 is at J0 position
+    
+    # Plot S0 base point
+    fig.add_trace(go.Scatter3d(
+        x=[s0_base_point[0]],
+        y=[s0_base_point[1]],
+        z=[s0_base_point[2]],
+        mode='markers+text',
+        marker=dict(size=12, color='darkred', symbol='diamond'),
+        text=['S0'],
+        textposition='top center',
+        name='S0 Base'
+    ))
+    
+    # Calculate and plot S points for ALL possible segments
+    s_points = [s0_base_point]  # Start with S0 base point
     s_directions = []
     prismatic_lengths = []
     joint_calculations = []  # Store joint state data
     kinematic_calculations = []  # Store kinematic data
     
-    for segment_idx in range(min(max_segments, len(joint_positions) - 3)):
+    for segment_idx in range(max_possible_segments):
         try:
             # Get segment result with J→S conversion
             result = delta_robot_cpp.calculate_segment_essential_from_joints(
@@ -93,16 +111,16 @@ def visualize_all_segments_and_joints(joint_positions: list, max_segments: int =
                         'HG_length': 0.0
                     })
                 
-                # Plot individual S point with both segment and joint prismatic lengths
+                # Plot individual S point - FIXED NUMBERING (S1, S2, S3...)
                 fig.add_trace(go.Scatter3d(
                     x=[calc_seg_pos[0]],
                     y=[calc_seg_pos[1]],
                     z=[calc_seg_pos[2]],
                     mode='markers+text',
                     marker=dict(size=12, color=ROBOT_COLORS['segment_points'], symbol='diamond'),
-                    text=[f'S{segment_idx}<br>Seg: {prismatic_length:.3f}<br>Joint: {joint_calculations[-1]["prismatic"]:.3f}'],
+                    text=[f'S{segment_idx+1}'],  # FIXED: segment_idx 0 → S1, 1 → S2, etc.
                     textposition='top center',
-                    name=f'Segment {segment_idx}'
+                    name=f'Segment S{segment_idx+1}'
                 ))
                 
                 # Direction vector from S point
@@ -113,12 +131,15 @@ def visualize_all_segments_and_joints(joint_positions: list, max_segments: int =
                 direction_color = ROBOT_COLORS['segment_directions'][segment_idx % len(ROBOT_COLORS['segment_directions'])]
                 add_vector_arrow(fig, calc_seg_pos, direction_end, 
                                color=direction_color, 
-                               name=f'Dir S{segment_idx}')
+                               name=f'Dir S{segment_idx+1}')  # FIXED: S1, S2, S3...
+                
+            else:
+                print(f"Failed to calculate segment {segment_idx}: {error_msg}")
                 
         except Exception as e:
             print(f"Error calculating segment {segment_idx}: {e}")
     
-    # Connect S points if we have multiple
+    # Connect ALL S points (S0 → S1 → S2 → ... → S8) for complete chain
     if len(s_points) > 1:
         s_x = [pos[0] for pos in s_points]
         s_y = [pos[1] for pos in s_points]
@@ -130,42 +151,24 @@ def visualize_all_segments_and_joints(joint_positions: list, max_segments: int =
             z=s_z,
             mode='lines',
             line=dict(color=ROBOT_COLORS['segment_chain'], width=5, dash='dash'),
-            name='S-Point Chain',
-            showlegend=False
+            name='Complete S-Chain (S0→S8)',
+            showlegend=True
         ))
-    
-    # Add summary text
-    summary_text = f'<b>J→S Conversion Summary:</b><br>'
-    summary_text += f'Joints: {len(joint_positions)}<br>'
-    summary_text += f'Segments Calculated: {len(s_points)}<br><br>'
-    if prismatic_lengths:
-        summary_text += f'<b>Segment Calculations:</b><br>'
-        for i, length in enumerate(prismatic_lengths):
-            summary_text += f'S{i}: {length:.3f}<br>'
-        summary_text += f'<br><b>Joint Prismatic Lengths:</b><br>'
-        for i, joint_calc in enumerate(joint_calculations):
-            summary_text += f'S{i}: {joint_calc["prismatic"]:.3f}<br>'
-    
-    fig.add_trace(go.Scatter3d(
-        x=[max(joint_x + [pos[0] for pos in s_points]) + 50],
-        y=[max(joint_y + [pos[1] for pos in s_points]) + 50],
-        z=[max(joint_z + [pos[2] for pos in s_points])],
-        mode='text',
-        text=[summary_text],
-        textfont=dict(size=12),
-        name='Summary',
-        showlegend=False
-    ))
     
     fig.show()
     
     # Print comprehensive results
     print(f"\n=== Complete J→S Conversion Results ===")
     print(f"Total Joints: {len(joint_positions)}")
-    print(f"Segments Calculated: {len(s_points)}")
-    for i, (s_point, direction, seg_length, joint_calc) in enumerate(zip(s_points, s_directions, prismatic_lengths, joint_calculations)):
-        print(f"Segment {i}:")
+    print(f"Maximum Possible Segments: {max_possible_segments}")
+    print(f"Segments Calculated: {len(s_points)-1}")  # Subtract 1 for S0 base point
+    print(f"Success Rate: {len(s_points)-1}/{max_possible_segments} ({100*(len(s_points)-1)/max_possible_segments:.1f}%)")
+    print(f"S0 Base Point: ({s_points[0][0]:.3f}, {s_points[0][1]:.3f}, {s_points[0][2]:.3f}) [at J0]")
+    
+    for i, (s_point, direction, seg_length, joint_calc, kinematic_calc) in enumerate(zip(s_points[1:], s_directions, prismatic_lengths, joint_calculations, kinematic_calculations)):
+        print(f"Segment S{i+1}:")  # FIXED: S1, S2, S3...
         print(f"  S-Point: ({s_point[0]:.3f}, {s_point[1]:.3f}, {s_point[2]:.3f})")
+        print(f"  End-Effector: ({kinematic_calc['end_effector'][0]:.3f}, {kinematic_calc['end_effector'][1]:.3f}, {kinematic_calc['end_effector'][2]:.3f})")
         print(f"  Direction: ({direction[0]:.3f}, {direction[1]:.3f}, {direction[2]:.3f})")
         print(f"  Segment Prismatic Length: {seg_length:.3f}")
         print(f"  Joint State - Prismatic: {joint_calc['prismatic']:.3f}, Roll: {np.degrees(joint_calc['roll']):.1f}°, Pitch: {np.degrees(joint_calc['pitch']):.1f}°")

@@ -237,6 +237,13 @@ bool SegmentBlock::needs_transformation(const Eigen::Vector3d& previous_directio
 
 Eigen::Vector3d SegmentBlock::convert_joint_to_segment_position(const std::vector<Eigen::Vector3d>& joint_positions,
                                                                int segment_index) {
+    int num_joints = static_cast<int>(joint_positions.size());
+    
+    // Special case: Last segment uses final joint as end-effector directly
+    if (segment_index == num_joints - 2) {
+        return joint_positions[num_joints - 1];  // Final joint is the segment position
+    }
+    
     if (segment_index == 0) {
         // S1 = J1 + direction(J1→J2) × distance(J1-J0)
         Eigen::Vector3d direction = (joint_positions[2] - joint_positions[1]).normalized();
@@ -276,20 +283,31 @@ std::pair<Eigen::Vector3d, Eigen::Vector3d> SegmentBlock::calculate_directions_f
 
 bool SegmentBlock::validate_joint_positions(const std::vector<Eigen::Vector3d>& joint_positions,
                                            int segment_index) {
-    // Check minimum required joints for segment calculation
-    int required_joints = segment_index + 3; // Need Ji-1, Ji, Ji+1, Ji+2
-    
-    if (static_cast<int>(joint_positions.size()) < required_joints) {
-        return false;
-    }
+    int num_joints = static_cast<int>(joint_positions.size());
     
     // Check for valid segment index
     if (segment_index < 0) {
         return false;
     }
     
+    // Maximum possible segments is num_joints - 1
+    if (segment_index >= num_joints - 1) {
+        return false;
+    }
+    
+    // Special case: Last segment only needs final joint
+    if (segment_index == num_joints - 2) {
+        return num_joints >= 2;  // Need at least 2 joints for last segment
+    }
+    
+    // Normal segments need at least segment_index + 3 joints
+    int required_joints = segment_index + 3;
+    if (num_joints < required_joints) {
+        return false;
+    }
+    
     // Check that joints are not degenerate (same positions)
-    for (int i = segment_index; i < segment_index + 3 && i + 1 < static_cast<int>(joint_positions.size()); i++) {
+    for (int i = segment_index; i < segment_index + 3 && i + 1 < num_joints; i++) {
         if ((joint_positions[i + 1] - joint_positions[i]).norm() < 1e-10) {
             return false; // Degenerate joint pair
         }

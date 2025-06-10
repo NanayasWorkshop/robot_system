@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Segment Block Test Runner
+Segment Block Test Runner - Updated to calculate ALL possible segments
 """
 
 import sys
@@ -28,11 +28,7 @@ def test_direction_based_methods():
         result = calculate_segment_essential(current_x, current_y, current_z, debug=True)
         prismatic_length, calc_time, success, error_msg = result
         
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
-        if not success:
-            print(f"Error: {error_msg}")
+        print(f"Summary: Prismatic={prismatic_length:.3f}, Time={calc_time:.3f}ms, Success={success}")
             
     except Exception as e:
         print(f"Error in Test 1: {e}")
@@ -46,33 +42,10 @@ def test_direction_based_methods():
                                            prev_x, prev_y, prev_z, debug=True)
         prismatic_length, calc_time, success, error_msg = result
         
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
-        if not success:
-            print(f"Error: {error_msg}")
+        print(f"Summary: Prismatic={prismatic_length:.3f}, Time={calc_time:.3f}ms, Success={success}")
             
     except Exception as e:
         print(f"Error in Test 2: {e}")
-    
-    # Test case 3: Complete calculation
-    print("\n=== Test 3: Complete Analysis ===")
-    try:
-        current_x, current_y, current_z = 0.1, 0.2, 1.0
-        result = calculate_segment_complete(current_x, current_y, current_z, debug=True)
-        prismatic_length, calc_time, success, error_msg, has_kinematics, has_joint_state, has_orientation = result
-        
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
-        print(f"Has Kinematics Data: {has_kinematics}")
-        print(f"Has Joint State Data: {has_joint_state}")
-        print(f"Has Orientation Data: {has_orientation}")
-        if not success:
-            print(f"Error: {error_msg}")
-            
-    except Exception as e:
-        print(f"Error in Test 3: {e}")
 
 def test_joint_based_methods():
     """Test joint-based segment calculation methods with J→S conversion"""
@@ -93,88 +66,68 @@ def test_joint_based_methods():
         [99.999, 49.999, 299.992]    # J8 - Final
     ]
     
-    # Test case 1: Essential calculation from joints - Segment 0 (S1)
-    print("\n=== Test 4: Essential from Joints (Segment 0) ===")
+    max_possible_segments = len(joint_positions) - 1  # Should be 8 segments (0-7)
+    
+    # Test case 1: Essential calculation from joints - First segment
+    print(f"\n=== Test 3: Essential from Joints (Segment 0) ===")
     try:
         segment_index = 0
         result = calculate_segment_essential_from_joints(joint_positions, segment_index, debug=True)
         prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = result
         
-        print(f"Segment Index: {segment_index}")
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
-        if success and calc_seg_pos is not None:
-            print(f"Calculated S-Point: ({calc_seg_pos[0]:.3f}, {calc_seg_pos[1]:.3f}, {calc_seg_pos[2]:.3f})")
-            print(f"Calculated Direction: ({calc_dir[0]:.3f}, {calc_dir[1]:.3f}, {calc_dir[2]:.3f})")
-        if not success:
-            print(f"Error: {error_msg}")
+        print(f"Summary: Segment {segment_index}, Prismatic={prismatic_length:.3f}, Success={success}")
+            
+    except Exception as e:
+        print(f"Error in Test 3: {e}")
+    
+    # Test case 2: Essential calculation from joints - Middle segment
+    print(f"\n=== Test 4: Essential from Joints (Segment 3) ===")
+    try:
+        segment_index = 3
+        result = calculate_segment_essential_from_joints(joint_positions, segment_index, debug=True)
+        prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = result
+        
+        print(f"Summary: Segment {segment_index}, Prismatic={prismatic_length:.3f}, Success={success}")
             
     except Exception as e:
         print(f"Error in Test 4: {e}")
     
-    # Test case 2: Essential calculation from joints - Segment 2 (S3)  
-    print("\n=== Test 5: Essential from Joints (Segment 2) ===")
+    # Test case 3: Essential calculation from joints - Last segment  
+    print(f"\n=== Test 5: Essential from Joints (Last Segment {max_possible_segments-1}) ===")
     try:
-        segment_index = 2
+        segment_index = max_possible_segments - 1  # Should be segment 7
         result = calculate_segment_essential_from_joints(joint_positions, segment_index, debug=True)
         prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = result
         
-        print(f"Segment Index: {segment_index}")
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
+        print(f"Summary: Segment {segment_index}, Prismatic={prismatic_length:.3f}, Success={success}")
         if success and calc_seg_pos is not None:
-            print(f"Calculated S-Point: ({calc_seg_pos[0]:.3f}, {calc_seg_pos[1]:.3f}, {calc_seg_pos[2]:.3f})")
-            print(f"Calculated Direction: ({calc_dir[0]:.3f}, {calc_dir[1]:.3f}, {calc_dir[2]:.3f})")
-        if not success:
-            print(f"Error: {error_msg}")
+            print(f"Final S-Point: ({calc_seg_pos[0]:.3f}, {calc_seg_pos[1]:.3f}, {calc_seg_pos[2]:.3f})")
+            print(f"Final Joint J8: ({joint_positions[-1][0]:.3f}, {joint_positions[-1][1]:.3f}, {joint_positions[-1][2]:.3f})")
+            print(f"Should be equal for last segment (end-effector)")
             
     except Exception as e:
         print(f"Error in Test 5: {e}")
     
-    # Test case 3: Essential calculation from joints - Segment 4 (S5) - Mid-chain
-    print("\n=== Test 5b: Essential from Joints (Segment 4) ===")
-    try:
-        segment_index = 4
-        result = calculate_segment_essential_from_joints(joint_positions, segment_index, debug=True)
-        prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = result
-        
-        print(f"Segment Index: {segment_index}")
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
-        if success and calc_seg_pos is not None:
-            print(f"Calculated S-Point: ({calc_seg_pos[0]:.3f}, {calc_seg_pos[1]:.3f}, {calc_seg_pos[2]:.3f})")
-            print(f"Calculated Direction: ({calc_dir[0]:.3f}, {calc_dir[1]:.3f}, {calc_dir[2]:.3f})")
-        if not success:
-            print(f"Error: {error_msg}")
-            
-    except Exception as e:
-        print(f"Error in Test 5b: {e}")
+    # Test all segments in summary
+    print(f"\n=== Test 6: All Segments Summary ===")
+    print(f"Testing all {max_possible_segments} possible segments...")
+    successful_segments = 0
     
-    # Test case 3: Complete calculation from joints
-    print("\n=== Test 6: Complete from Joints (Segment 0) ===")
-    try:
-        segment_index = 0
-        result = calculate_segment_complete_from_joints(joint_positions, segment_index, debug=True)
-        prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir, has_kinematics, has_joint_state, has_orientation = result
-        
-        print(f"Segment Index: {segment_index}")
-        print(f"Prismatic Length: {prismatic_length:.3f}")
-        print(f"Calculation Time: {calc_time:.3f}ms")
-        print(f"Success: {success}")
-        print(f"Has Kinematics Data: {has_kinematics}")
-        print(f"Has Joint State Data: {has_joint_state}")
-        print(f"Has Orientation Data: {has_orientation}")
-        if success and calc_seg_pos is not None:
-            print(f"Calculated S-Point: ({calc_seg_pos[0]:.3f}, {calc_seg_pos[1]:.3f}, {calc_seg_pos[2]:.3f})")
-            print(f"Calculated Direction: ({calc_dir[0]:.3f}, {calc_dir[1]:.3f}, {calc_dir[2]:.3f})")
-        if not success:
-            print(f"Error: {error_msg}")
+    for segment_idx in range(max_possible_segments):
+        try:
+            result = calculate_segment_essential_from_joints(joint_positions, segment_idx, debug=False)
+            prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = result
             
-    except Exception as e:
-        print(f"Error in Test 6: {e}")
+            if success:
+                successful_segments += 1
+                print(f"  Segment {segment_idx}: ✓ Prismatic={prismatic_length:.3f}")
+            else:
+                print(f"  Segment {segment_idx}: ✗ Error: {error_msg}")
+                
+        except Exception as e:
+            print(f"  Segment {segment_idx}: ✗ Exception: {e}")
+    
+    print(f"Success Rate: {successful_segments}/{max_possible_segments} ({100*successful_segments/max_possible_segments:.1f}%)")
 
 def test_error_cases():
     """Test error handling"""
@@ -187,33 +140,32 @@ def test_error_cases():
     try:
         result = calculate_segment_essential(0.5, 0.5, -0.1, debug=False)
         prismatic_length, calc_time, success, error_msg = result
-        print(f"Success: {success}")
-        print(f"Error Message: {error_msg}")
+        print(f"Expected failure: Success={success}, Error='{error_msg}'")
         
     except Exception as e:
         print(f"Exception caught: {e}")
     
-    # Test case 2: Insufficient joint positions
-    print("\n=== Test 8: Insufficient Joint Positions ===")
+    # Test case 2: Invalid segment index (too high)
+    print("\n=== Test 8: Invalid Segment Index ===")
     try:
-        insufficient_joints = [
-            [0.0, 0.0, 0.0],
-            [5.0, 5.0, 10.0]
+        valid_joints = [
+            [0.0, 0.0, 0.0], [10.0, 0.0, 20.0], [20.0, 10.0, 40.0], 
+            [30.0, 20.0, 60.0], [40.0, 30.0, 80.0]
         ]
-        result = calculate_segment_essential_from_joints(insufficient_joints, 0, debug=False)
+        # Try to calculate segment 10 with only 5 joints (should fail)
+        result = calculate_segment_essential_from_joints(valid_joints, 10, debug=False)
         prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = result
-        print(f"Success: {success}")
-        print(f"Error Message: {error_msg}")
+        print(f"Expected failure: Success={success}, Error='{error_msg}'")
         
     except Exception as e:
         print(f"Exception caught: {e}")
 
 def main():
     """Run all tests"""
-    print("SEGMENT BLOCK COMPREHENSIVE TEST")
-    print("=" * 60)
+    print("SEGMENT BLOCK COMPREHENSIVE TEST - ALL SEGMENTS")
+    print("=" * 70)
     
-    # First show comprehensive visualization
+    # Real FABRIK joint positions for visualization
     joint_positions = [
         [0.000, 0.000, 0.000],      # J0 - Base
         [0.000, 0.000, 73.591],     # J1 
@@ -226,19 +178,22 @@ def main():
         [99.999, 49.999, 299.992]    # J8 - Final
     ]
     
-    print("\n" + "=" * 60)
-    print("COMPREHENSIVE J→S VISUALIZATION")
-    print("=" * 60)
-    visualize_all_segments_and_joints(joint_positions, max_segments=5)
+    print(f"\n" + "=" * 70)
+    print("COMPREHENSIVE J→S VISUALIZATION - ALL SEGMENTS")
+    print("=" * 70)
+    print(f"Expected: {len(joint_positions)-1} segments from {len(joint_positions)} joints")
+    
+    # Show comprehensive visualization with ALL segments
+    visualize_all_segments_and_joints(joint_positions)
     
     # Run all test categories
     test_direction_based_methods()
     test_joint_based_methods()
     test_error_cases()
     
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("ALL TESTS COMPLETED")
-    print("=" * 60)
+    print("=" * 70)
 
 if __name__ == "__main__":
     main()

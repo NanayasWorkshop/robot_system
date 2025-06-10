@@ -62,7 +62,7 @@ def add_coordinate_system(fig, scale=10.0, origin=(0, 0, 0)):
         showlegend=False
     ))
 
-def create_base_3d_figure(title="Delta Robot Visualization", width=800, height=600):
+def create_base_3d_figure(title="Delta Robot Visualization", width=1600, height=1200):
     """
     Create standardized 3D figure with coordinate system and consistent styling
     FIXED: Enforces 1:1:1 aspect ratio for accurate spatial representation
