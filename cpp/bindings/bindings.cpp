@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 
 // Include all blocks
+#include "../blocks/cone_constraint_block.hpp"
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
@@ -22,6 +23,9 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     m.attr("BASE_A_ANGLE") = delta::BASE_A_ANGLE;
     m.attr("BASE_B_ANGLE") = delta::BASE_B_ANGLE;
     m.attr("BASE_C_ANGLE") = delta::BASE_C_ANGLE;
+    m.attr("SPHERICAL_JOINT_CONE_ANGLE_RAD") = delta::SPHERICAL_JOINT_CONE_ANGLE_RAD;
+    m.attr("FABRIK_TOLERANCE") = delta::FABRIK_TOLERANCE;
+    m.attr("FABRIK_MAX_ITERATIONS") = delta::FABRIK_MAX_ITERATIONS;
     
     // ===== COORDINATE FRAME CLASS =====
     py::class_<delta::CoordinateFrame>(m, "CoordinateFrame")
@@ -30,6 +34,15 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         .def_readwrite("u_axis", &delta::CoordinateFrame::u_axis)
         .def_readwrite("v_axis", &delta::CoordinateFrame::v_axis)
         .def_readwrite("w_axis", &delta::CoordinateFrame::w_axis);
+    
+    // ===== CONE CONSTRAINT BLOCK =====
+    m.def("calculate_cone_constraint", [](const Eigen::Vector3d& desired_direction,
+                                         const Eigen::Vector3d& cone_apex,
+                                         const Eigen::Vector3d& cone_axis,
+                                         double cone_angle_rad) {
+        auto result = delta::ConeConstraintBlock::calculate(desired_direction, cone_apex, cone_axis, cone_angle_rad);
+        return std::make_tuple(result.projected_direction, result.constraint_applied, result.calculation_time_ms);
+    }, "Project direction vector onto spherical joint cone constraints");
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {

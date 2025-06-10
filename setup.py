@@ -13,6 +13,7 @@ ext_modules = [
             "cpp/blocks/joint_state_block.cpp", 
             "cpp/blocks/orientation_block.cpp", 
             "cpp/blocks/segment_block.cpp", 
+            "cpp/blocks/cone_constraint_block.cpp", 
             # Add more .cpp files here as you create new blocks
         ],
         include_dirs=[

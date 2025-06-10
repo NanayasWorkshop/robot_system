@@ -1,5 +1,6 @@
 setup.py
 cpp/bindings/bindings.cpp
+cpp/blocks/cone_constraint_block.cpp
 cpp/blocks/fermat_block.cpp
 cpp/blocks/joint_state_block.cpp
 cpp/blocks/kinematics_block.cpp
