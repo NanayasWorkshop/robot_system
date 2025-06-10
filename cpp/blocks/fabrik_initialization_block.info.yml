@@ -1,0 +1,73 @@
+# fabrik_initialization_block.info.yml
+name: "FABRIK Initialization Block"
+description: "Creates initial multi-segment chain configurations for FABRIK solving as simple joint position arrays"
+version: "1.0"
+category: "fundamental_block"
+level: 1
+
+inputs:
+  - name: "num_robot_segments"
+    type: "int"
+    description: "Number of robot segments to create"
+    constraints: "Positive integer, typically 3-7 segments, max 20"
+  - name: "initial_joint_positions"
+    type: "std::optional<std::vector<Eigen::Vector3d>>"
+    description: "Custom initial positions (if not provided, creates straight-up configuration)"
+    constraints: "If provided, must have num_robot_segments + 2 positions with base at origin"
+
+outputs:
+  - name: "joint_positions"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Initial joint position array ready for FABRIK solving"
+  - name: "validation_successful"
+    type: "bool"
+    description: "Whether configuration is geometrically valid"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "DEFAULT_ROBOT_SEGMENTS (7)"
+  - "MIN_HEIGHT"
+  - "MOTOR_LIMIT"
+  - "WORKING_HEIGHT"
+
+internal_blocks:
+  - "None"
+
+performance:
+  typical_time_range: "0.05-0.2ms"
+
+algorithm:
+  straight_up_creation:
+    - "Calculate segment length from robot constants (hypotenuse/2)"
+    - "Create base joint at origin (0,0,0)"
+    - "Stack segment joints vertically using WORKING_HEIGHT spacing"
+    - "Add final end-effector joint"
+  validation:
+    - "Check correct number of joints (num_segments + 2)"
+    - "Verify base is at origin"
+    - "Validate reasonable spacing between consecutive joints (1mm-2m)"
+
+joint_array_structure:
+  description: "Simple array of 3D positions for FABRIK processing"
+  format: "[J0_base, J1_seg1, J2_seg2, ..., JN_segN, JN+1_end_effector]"
+  example_7_segments: "[J0, J1, J2, J3, J4, J5, J6, J7, J8] = 9 total joints"
+
+fabrik_integration:
+  purpose: "Provides initial joint positions for FABRIK backward/forward iterations"
+  output_usage: "joint_positions array fed directly to FabrikBackwardBlock and FabrikForwardBlock"
+  no_complex_structures: "No joint types, constraints, or segment metadata - just positions"
+
+notes:
+  - "Level 1 fundamental block - no dependencies on other blocks"
+  - "Simplified from complex FabrikChain structure to simple position array"
+  - "Straight-up configuration always geometrically valid"
+  - "Custom positions validated for basic geometric constraints"
+  - "Output directly compatible with FABRIK iteration algorithms"
+  - "Segment stacking uses robot physical constants for realistic spacing"

@@ -14,6 +14,7 @@ ext_modules = [
             "cpp/blocks/orientation_block.cpp", 
             "cpp/blocks/segment_block.cpp", 
             "cpp/blocks/cone_constraint_block.cpp", 
+            "cpp/blocks/fabrik_initialization_block.cpp", 
             # Add more .cpp files here as you create new blocks
         ],
         include_dirs=[

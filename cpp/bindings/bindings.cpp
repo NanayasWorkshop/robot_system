@@ -4,6 +4,7 @@
 
 // Include all blocks
 #include "../blocks/cone_constraint_block.hpp"
+#include "../blocks/fabrik_initialization_block.hpp"
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
@@ -23,6 +24,7 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     m.attr("BASE_A_ANGLE") = delta::BASE_A_ANGLE;
     m.attr("BASE_B_ANGLE") = delta::BASE_B_ANGLE;
     m.attr("BASE_C_ANGLE") = delta::BASE_C_ANGLE;
+    m.attr("DEFAULT_ROBOT_SEGMENTS") = delta::DEFAULT_ROBOT_SEGMENTS;
     m.attr("SPHERICAL_JOINT_CONE_ANGLE_RAD") = delta::SPHERICAL_JOINT_CONE_ANGLE_RAD;
     m.attr("FABRIK_TOLERANCE") = delta::FABRIK_TOLERANCE;
     m.attr("FABRIK_MAX_ITERATIONS") = delta::FABRIK_MAX_ITERATIONS;
@@ -43,6 +45,14 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         auto result = delta::ConeConstraintBlock::calculate(desired_direction, cone_apex, cone_axis, cone_angle_rad);
         return std::make_tuple(result.projected_direction, result.constraint_applied, result.calculation_time_ms);
     }, "Project direction vector onto spherical joint cone constraints");
+    
+    // ===== FABRIK INITIALIZATION BLOCK =====
+    m.def("calculate_fabrik_initialization", [](int num_robot_segments,
+                                               std::optional<std::vector<Eigen::Vector3d>> initial_joint_positions) {
+        auto result = delta::FabrikInitializationBlock::calculate(num_robot_segments, initial_joint_positions);
+        return std::make_tuple(result.joint_positions, result.validation_successful, result.calculation_time_ms);
+    }, "Create initial joint positions for FABRIK solving", 
+       py::arg("num_robot_segments"), py::arg("initial_joint_positions") = py::none());
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {

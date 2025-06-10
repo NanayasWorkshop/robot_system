@@ -12,6 +12,7 @@ constexpr double WORKING_HEIGHT = 11.5;
 constexpr double MOTOR_LIMIT = 11.0;
 
 // FABRIK Configuration Constants
+constexpr int DEFAULT_ROBOT_SEGMENTS = 7;                              // Default number of stacked segments
 constexpr double SPHERICAL_JOINT_CONE_ANGLE_RAD = 2.0 * M_PI / 3.0;   // 120 degrees full cone
 constexpr double FABRIK_TOLERANCE = 0.01;                              // Convergence tolerance
 constexpr int FABRIK_MAX_ITERATIONS = 100;                             // Maximum solver iterations
