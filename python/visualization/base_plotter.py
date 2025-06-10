@@ -1,6 +1,7 @@
 """
 Base Plotly Module for Delta Robot Visualizations
 Provides standardized 3D plotting with coordinate system and consistent styling
+FIXED: 1:1:1 aspect ratio for accurate spatial representation
 """
 
 import plotly.graph_objects as go
@@ -64,6 +65,7 @@ def add_coordinate_system(fig, scale=10.0, origin=(0, 0, 0)):
 def create_base_3d_figure(title="Delta Robot Visualization", width=800, height=600):
     """
     Create standardized 3D figure with coordinate system and consistent styling
+    FIXED: Enforces 1:1:1 aspect ratio for accurate spatial representation
     
     Args:
         title: Plot title
@@ -78,7 +80,7 @@ def create_base_3d_figure(title="Delta Robot Visualization", width=800, height=6
     # Add coordinate system at origin
     add_coordinate_system(fig, scale=15.0)
     
-    # Standard layout
+    # Standard layout with FIXED 1:1:1 aspect ratio
     fig.update_layout(
         title=dict(
             text=title,
@@ -89,7 +91,11 @@ def create_base_3d_figure(title="Delta Robot Visualization", width=800, height=6
             xaxis_title="X (mm)",
             yaxis_title="Y (mm)", 
             zaxis_title="Z (mm)",
-            aspectmode='cube',
+            aspectmode='data',  # Respect data ranges but maintain equal scaling
+            aspectratio=dict(x=1, y=1, z=1),  # Equal scaling per unit
+            xaxis=dict(dtick=50),  # Same step size for all axes
+            yaxis=dict(dtick=50),
+            zaxis=dict(dtick=50),
             camera=dict(
                 eye=dict(x=1.5, y=1.5, z=1.2)  # Nice 3D viewing angle
             )
@@ -152,5 +158,12 @@ ROBOT_COLORS = {
     'fermat_point': 'purple',
     'end_effector': 'orange',
     'input_vector': 'darkorange',
-    'base_positions': 'gray'
+    'base_positions': 'gray',
+    # Segment-specific colors
+    'joint_chain': 'lightblue',
+    'joint_points': 'lightblue',
+    'segment_points': 'purple',
+    'segment_chain': 'purple',
+    'segment_directions': ['rgb(205, 150, 200)', 'rgb(230, 175, 225)', 'rgb(180, 100, 175)', 'rgb(255, 200, 250)', 'rgb(160, 80, 155)'],
+    'previous_direction': 'darkgray'
 }
