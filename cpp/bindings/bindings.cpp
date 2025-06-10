@@ -5,6 +5,7 @@
 // Include all blocks
 #include "../blocks/cone_constraint_block.hpp"
 #include "../blocks/fabrik_initialization_block.hpp"
+#include "../blocks/fabrik_backward_block.hpp"
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
@@ -53,6 +54,14 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         return std::make_tuple(result.joint_positions, result.validation_successful, result.calculation_time_ms);
     }, "Create initial joint positions for FABRIK solving", 
        py::arg("num_robot_segments"), py::arg("initial_joint_positions") = py::none());
+    
+    // ===== FABRIK BACKWARD BLOCK =====
+    m.def("calculate_fabrik_backward", [](const std::vector<Eigen::Vector3d>& joint_positions,
+                                         const Eigen::Vector3d& target_position,
+                                         const std::vector<double>& segment_lengths) {
+        auto result = delta::FabrikBackwardBlock::calculate(joint_positions, target_position, segment_lengths);
+        return std::make_tuple(result.updated_joint_positions, result.distance_to_base, result.calculation_time_ms);
+    }, "Single backward pass from target to base with cone constraints");
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {

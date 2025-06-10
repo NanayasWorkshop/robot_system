@@ -1,0 +1,80 @@
+# fabrik_backward_block.info.yml
+name: "FABRIK Backward Block"
+description: "Single backward pass from target to base with cone constraints for FABRIK algorithm"
+version: "1.0"
+category: "composite_block"
+level: 2
+
+inputs:
+  - name: "joint_positions"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Current joint position array"
+    constraints: "Non-empty array of 3D positions"
+  - name: "target_position"
+    type: "Eigen::Vector3d"
+    description: "Target position for end-effector"
+    constraints: "Any 3D position"
+  - name: "segment_lengths"
+    type: "std::vector<double>"
+    description: "Fixed distances between consecutive joints"
+    constraints: "Array with size = joint_positions.size() - 1, positive values"
+
+outputs:
+  - name: "updated_joint_positions"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Joint positions after single backward pass"
+  - name: "distance_to_base"
+    type: "double"
+    description: "Distance from end-effector to base (indicates base drift)"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "blocks/cone_constraint_block.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "SPHERICAL_JOINT_CONE_ANGLE_RAD"
+
+internal_blocks:
+  - "ConeConstraintBlock"
+
+performance:
+  typical_time_range: "0.1-0.5ms (single pass, chain length dependent)"
+
+algorithm:
+  single_backward_pass:
+    - "Set end-effector (last joint) to target position"
+    - "Work backwards from second-to-last joint to base:"
+    - "  - Calculate desired direction from next joint toward original position"
+    - "  - Apply cone constraints for spherical joints using ConeConstraintBlock"
+    - "  - Place current joint at segment_length distance in constrained direction"
+    - "Return updated joint positions after single pass"
+  cone_constraints:
+    - "Applied when joint i+1 exists and joint i+2 exists for axis definition"
+    - "Cone apex at joint i+1, axis from joint i+2 toward joint i+1"
+    - "Uses 120° spherical joint constraint via ConeConstraintBlock"
+
+stateless_design:
+  behavior: "Pure function - one input → one output, no iteration state"
+  single_pass: "Performs exactly one backward pass through the chain"
+  no_convergence: "Does not check convergence - that's FabrikSolverBlock's job"
+  base_drift: "Expected side effect - base moves away from origin"
+
+fabrik_integration:
+  position: "Core component called by FabrikSolverBlock"
+  usage_pattern: "Solver calls: Backward → Forward → repeat until converged"
+  input_source: "Joint positions from FabrikInitializationBlock or previous iteration"
+  output_usage: "Fed to FabrikForwardBlock to fix base position"
+  constraint_handling: "Enforces 120° spherical joint limits during backward movement"
+
+notes:
+  - "Level 2 composite block - uses ConeConstraintBlock for joint constraints"
+  - "Extracted core algorithm from proven fabrik_backward.cpp single_backward_iteration"
+  - "Stateless design - no iteration logic, just one pass"
+  - "Base drift is expected behavior - fixed by subsequent forward pass"
+  - "Fallback directions prevent degenerate mathematical cases"
+  - "Removed convergence/iteration logic - belongs in FabrikSolverBlock"
