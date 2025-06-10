@@ -67,11 +67,12 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
     
     // ===== FABRIK FORWARD BLOCK =====
     m.def("calculate_fabrik_forward", [](const std::vector<Eigen::Vector3d>& joint_positions,
-                                        const Eigen::Vector3d& target_position) {
-        auto result = delta::FabrikForwardBlock::calculate(joint_positions, target_position);
+                                        const Eigen::Vector3d& target_position,
+                                        const std::vector<double>& segment_lengths) {
+        auto result = delta::FabrikForwardBlock::calculate(joint_positions, target_position, segment_lengths);
         return std::make_tuple(result.updated_joint_positions, result.recalculated_segment_lengths, 
                               result.distance_to_target, result.calculation_time_ms);
-    }, "Single forward pass from base to end with dynamic segment recalculation");
+    }, "Single forward pass from base to end using fixed segment lengths");
     
     // ===== FABRIK SOLVER BLOCK =====
     m.def("calculate_fabrik_solver", [](const Eigen::Vector3d& target_position,
@@ -83,7 +84,7 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
                                                      num_robot_segments, tolerance, max_iterations);
         return std::make_tuple(result.final_joint_positions, result.achieved_position, result.converged,
                               result.final_error, result.total_iterations, result.solve_time_ms);
-    }, "Complete FABRIK solver with backward/forward cycles until convergence",
+    }, "Complete FABRIK solver with optimized backward/forward cycles until convergence",
        py::arg("target_position"), 
        py::arg("initial_joint_positions") = py::none(),
        py::arg("num_robot_segments") = delta::DEFAULT_ROBOT_SEGMENTS,

@@ -9,6 +9,7 @@
 #include "fabrik_initialization_block.hpp"
 #include "fabrik_backward_block.hpp"
 #include "fabrik_forward_block.hpp"
+#include "segment_block.hpp"
 
 namespace delta {
 
@@ -49,6 +50,18 @@ private:
     static double calculate_distance_to_target(
         const std::vector<Eigen::Vector3d>& joint_positions,
         const Eigen::Vector3d& target_position
+    );
+    
+    // Calculate updated segment lengths using SegmentBlock
+    static std::vector<double> calculate_updated_segment_lengths(
+        const std::vector<Eigen::Vector3d>& joint_positions
+    );
+    
+    // Convert prismatic length to FABRIK segment length
+    static double convert_prismatic_to_fabrik_length(
+        double prismatic_length, 
+        int segment_index, 
+        int total_segments
     );
 };
 

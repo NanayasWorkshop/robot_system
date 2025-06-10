@@ -1,4 +1,4 @@
-// fabrik_forward_block.hpp - Clean Version
+// fabrik_forward_block.hpp - Optimized Version
 
 #ifndef DELTA_BLOCKS_FABRIK_FORWARD_BLOCK_HPP
 #define DELTA_BLOCKS_FABRIK_FORWARD_BLOCK_HPP
@@ -8,13 +8,12 @@
 #include "../core/constants.hpp"
 #include "../core/timing.hpp"
 #include "cone_constraint_block.hpp"
-#include "segment_block.hpp"
 
 namespace delta {
 
 struct FabrikForwardResult {
     std::vector<Eigen::Vector3d> updated_joint_positions;      // Joint positions with base fixed at origin
-    std::vector<double> recalculated_segment_lengths;          // NEW segment lengths for next iteration
+    std::vector<double> recalculated_segment_lengths;          // Same as input (no recalculation)
     double distance_to_target;                                 // How far end-effector drifted from target
     double calculation_time_ms;                                // Time taken for calculation
     
@@ -27,19 +26,16 @@ struct FabrikForwardResult {
 
 class FabrikForwardBlock {
 public:
-    // Single forward pass from base to end with dynamic segment recalculation
+    // Single forward pass from base to end using fixed segment lengths
     static FabrikForwardResult calculate(const std::vector<Eigen::Vector3d>& joint_positions,
-                                        const Eigen::Vector3d& target_position);
+                                        const Eigen::Vector3d& target_position,
+                                        const std::vector<double>& segment_lengths);
 
 private:
     // Single forward pass implementation
     static std::vector<Eigen::Vector3d> single_forward_pass(const std::vector<Eigen::Vector3d>& joint_positions,
                                                            const Eigen::Vector3d& target_position,
-                                                           std::vector<double>& recalculated_lengths);
-    
-    // Calculate new segment length using complete joint chain with SegmentBlock
-    static double calculate_new_segment_length_from_complete_chain(const std::vector<Eigen::Vector3d>& complete_joint_chain,
-                                                                  int segment_index, int total_segments);
+                                                           const std::vector<double>& segment_lengths);
     
     // Apply cone constraint for spherical joints
     static Eigen::Vector3d apply_cone_constraint_if_needed(const Eigen::Vector3d& desired_direction,
@@ -49,10 +45,6 @@ private:
     // Calculate distance from end-effector to target
     static double calculate_distance_to_target(const std::vector<Eigen::Vector3d>& joint_positions,
                                               const Eigen::Vector3d& target_position);
-    
-    // Convert prismatic length to FABRIK segment length
-    static double convert_prismatic_to_fabrik_length(double prismatic_length, 
-                                                    int segment_index, int total_segments);
 };
 
 } // namespace delta

@@ -1,5 +1,6 @@
 #include "fabrik_solver_block.hpp"
 #include <cmath>
+#include <limits>
 
 namespace delta {
 
@@ -33,26 +34,25 @@ FabrikSolverResult FabrikSolverBlock::solve(
             // Step 3: Convergence loop
             int iteration = 0;
             double current_error = calculate_distance_to_target(current_joints, target_position);
+            bool converged = false;
             
             // Check if already at target
             if (current_error <= tolerance) {
-                return FabrikSolverResult(current_joints, current_joints.back(), 
-                                        true, current_error, 0, solve_time_ms);
+                converged = true;
             }
             
-            while (iteration < max_iterations) {
+            while (iteration < max_iterations && !converged) {
                 
                 // Backward pass: target → base
                 FabrikBackwardResult backward_result = FabrikBackwardBlock::calculate(
                     current_joints, target_position, segment_lengths);
                 
-                // Forward pass: base → end (recalculates segment lengths)
+                // Forward pass: base → end (with FIXED segment lengths)
                 FabrikForwardResult forward_result = FabrikForwardBlock::calculate(
-                    backward_result.updated_joint_positions, target_position);
+                    backward_result.updated_joint_positions, target_position, segment_lengths);
                 
                 // UPDATE: Use forward pass output as new input for next iteration
                 current_joints = forward_result.updated_joint_positions;
-                segment_lengths = forward_result.recalculated_segment_lengths;
                 
                 // Check convergence
                 current_error = calculate_distance_to_target(current_joints, target_position);
@@ -60,12 +60,21 @@ FabrikSolverResult FabrikSolverBlock::solve(
                 
                 // Exit if converged
                 if (current_error <= tolerance) {
-                    break;
+                    converged = true;
+                }
+                
+                // Calculate new segment lengths for next iteration (if not converged)
+                if (!converged && iteration < max_iterations) {
+                    segment_lengths = calculate_updated_segment_lengths(current_joints);
                 }
             }
             
+            // FINAL STEP: One more length update after convergence to ensure proper segments
+            if (converged || iteration >= max_iterations) {
+                segment_lengths = calculate_updated_segment_lengths(current_joints);
+            }
+            
             // Package results
-            bool converged = (current_error <= tolerance);
             Eigen::Vector3d achieved_position = current_joints.back();
             
             return FabrikSolverResult(current_joints, achieved_position, converged, 
@@ -106,6 +115,58 @@ double FabrikSolverBlock::calculate_distance_to_target(
     // Distance from end-effector (last joint) to target
     Eigen::Vector3d end_effector = joint_positions.back();
     return (end_effector - target_position).norm();
+}
+
+std::vector<double> FabrikSolverBlock::calculate_updated_segment_lengths(
+    const std::vector<Eigen::Vector3d>& joint_positions) {
+    
+    std::vector<double> new_lengths;
+    new_lengths.reserve(joint_positions.size() - 1);
+    
+    int total_segments = static_cast<int>(joint_positions.size()) - 1;
+    
+    for (int i = 0; i < total_segments; i++) {
+        try {
+            // Use SegmentBlock for accurate length calculation
+            SegmentResult segment_result = SegmentBlock::calculate_essential_from_joints(
+                joint_positions, i);
+            
+            if (segment_result.calculation_successful) {
+                // Convert prismatic to FABRIK length
+                double fabrik_length = convert_prismatic_to_fabrik_length(
+                    segment_result.prismatic_length, i, total_segments);
+                new_lengths.push_back(fabrik_length);
+            } else {
+                // Fallback: use current Euclidean distance
+                double euclidean_length = (joint_positions[i+1] - joint_positions[i]).norm();
+                new_lengths.push_back(euclidean_length);
+            }
+        } catch (const std::exception& e) {
+            // Fallback on any error
+            double euclidean_length = (joint_positions[i+1] - joint_positions[i]).norm();
+            new_lengths.push_back(euclidean_length);
+        }
+    }
+    
+    return new_lengths;
+}
+
+double FabrikSolverBlock::convert_prismatic_to_fabrik_length(double prismatic_length, 
+                                                           int segment_index, int total_segments) {
+    // H→G distance from prismatic length
+    double h_to_g_distance = MIN_HEIGHT + 2.0 * MOTOR_LIMIT + prismatic_length;
+    
+    // Convert to FABRIK segment length using the same pattern as initialization
+    if (segment_index == 0) {
+        // First FABRIK segment: WORKING_HEIGHT + h_to_g_distance/2
+        return WORKING_HEIGHT + h_to_g_distance / 2.0;
+    } else if (segment_index == total_segments - 1) {
+        // Last FABRIK segment: h_to_g_distance/2 + WORKING_HEIGHT
+        return h_to_g_distance / 2.0 + WORKING_HEIGHT;
+    } else {
+        // Middle FABRIK segments: h_to_g_distance/2 + 2*WORKING_HEIGHT + h_to_g_distance/2
+        return h_to_g_distance / 2.0 + 2.0 * WORKING_HEIGHT + h_to_g_distance / 2.0;
+    }
 }
 
 } // namespace delta
