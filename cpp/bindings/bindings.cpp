@@ -2,12 +2,7 @@
 #include <pybind11/eigen.h>
 #include <pybind11/stl.h>
 
-// Include all blocks
-#include "../blocks/cone_constraint_block.hpp"
-#include "../blocks/fabrik_initialization_block.hpp"
-#include "../blocks/fabrik_backward_block.hpp"
-#include "../blocks/fabrik_forward_block.hpp"
-#include "../blocks/fabrik_solver_block.hpp"
+// Include only existing blocks
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
@@ -39,57 +34,6 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         .def_readwrite("u_axis", &delta::CoordinateFrame::u_axis)
         .def_readwrite("v_axis", &delta::CoordinateFrame::v_axis)
         .def_readwrite("w_axis", &delta::CoordinateFrame::w_axis);
-    
-    // ===== CONE CONSTRAINT BLOCK =====
-    m.def("calculate_cone_constraint", [](const Eigen::Vector3d& desired_direction,
-                                         const Eigen::Vector3d& cone_apex,
-                                         const Eigen::Vector3d& cone_axis,
-                                         double cone_angle_rad) {
-        auto result = delta::ConeConstraintBlock::calculate(desired_direction, cone_apex, cone_axis, cone_angle_rad);
-        return std::make_tuple(result.projected_direction, result.constraint_applied, result.calculation_time_ms);
-    }, "Project direction vector onto spherical joint cone constraints");
-    
-    // ===== FABRIK INITIALIZATION BLOCK =====
-    m.def("calculate_fabrik_initialization", [](int num_robot_segments,
-                                               std::optional<std::vector<Eigen::Vector3d>> initial_joint_positions) {
-        auto result = delta::FabrikInitializationBlock::calculate(num_robot_segments, initial_joint_positions);
-        return std::make_tuple(result.joint_positions, result.validation_successful, result.calculation_time_ms);
-    }, "Create initial joint positions for FABRIK solving", 
-       py::arg("num_robot_segments"), py::arg("initial_joint_positions") = py::none());
-    
-    // ===== FABRIK BACKWARD BLOCK =====
-    m.def("calculate_fabrik_backward", [](const std::vector<Eigen::Vector3d>& joint_positions,
-                                         const Eigen::Vector3d& target_position,
-                                         const std::vector<double>& segment_lengths) {
-        auto result = delta::FabrikBackwardBlock::calculate(joint_positions, target_position, segment_lengths);
-        return std::make_tuple(result.updated_joint_positions, result.distance_to_base, result.calculation_time_ms);
-    }, "Single backward pass from target to base with cone constraints");
-    
-    // ===== FABRIK FORWARD BLOCK =====
-    m.def("calculate_fabrik_forward", [](const std::vector<Eigen::Vector3d>& joint_positions,
-                                        const Eigen::Vector3d& target_position,
-                                        const std::vector<double>& segment_lengths) {
-        auto result = delta::FabrikForwardBlock::calculate(joint_positions, target_position, segment_lengths);
-        return std::make_tuple(result.updated_joint_positions, result.recalculated_segment_lengths, 
-                              result.distance_to_target, result.calculation_time_ms);
-    }, "Single forward pass from base to end using fixed segment lengths");
-    
-    // ===== FABRIK SOLVER BLOCK =====
-    m.def("calculate_fabrik_solver", [](const Eigen::Vector3d& target_position,
-                                       std::optional<std::vector<Eigen::Vector3d>> initial_joint_positions,
-                                       int num_robot_segments,
-                                       double tolerance,
-                                       int max_iterations) {
-        auto result = delta::FabrikSolverBlock::solve(target_position, initial_joint_positions, 
-                                                     num_robot_segments, tolerance, max_iterations);
-        return std::make_tuple(result.final_joint_positions, result.achieved_position, result.converged,
-                              result.final_error, result.total_iterations, result.solve_time_ms);
-    }, "Complete FABRIK solver with optimized backward/forward cycles until convergence",
-       py::arg("target_position"), 
-       py::arg("initial_joint_positions") = py::none(),
-       py::arg("num_robot_segments") = delta::DEFAULT_ROBOT_SEGMENTS,
-       py::arg("tolerance") = delta::FABRIK_TOLERANCE,
-       py::arg("max_iterations") = delta::FABRIK_MAX_ITERATIONS);
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {
