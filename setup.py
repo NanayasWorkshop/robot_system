@@ -13,12 +13,10 @@ ext_modules = [
             "cpp/blocks/joint_state_block.cpp", 
             "cpp/blocks/orientation_block.cpp", 
             "cpp/blocks/segment_block.cpp", 
-            "cpp/blocks/cone_constraint_block.cpp", 
-            "cpp/blocks/fabrik_initialization_block.cpp", 
-            "cpp/blocks/fabrik_backward_block.cpp",
-            "cpp/blocks/fabrik_forward_block.cpp",
+            "cpp/blocks/fabrik_initialization_block.cpp",
+            "cpp/blocks/fabrik_iteration_block.cpp",
             "cpp/blocks/fabrik_solver_block.cpp",
-            # Add more .cpp files here as you create new blocks
+            # Future FABRIK blocks can be added here
         ],
         include_dirs=[
             # Path to your headers
@@ -36,8 +34,8 @@ setup(
     name="delta_robot",
     version="0.1.0",
     author="Yuuki",
-    description="Delta Robot Block-Based Control System",
-    long_description="Clean, modular delta robot control with visualization",
+    description="Delta Robot Block-Based Control System with FABRIK",
+    long_description="Clean, modular delta robot control with FABRIK inverse kinematics and visualization",
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
     packages=find_packages(where="python"),

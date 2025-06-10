@@ -1,0 +1,98 @@
+# fabrik_initialization_block.info.yml
+name: "FABRIK Initialization Block"
+description: "Creates initial joint positions and distances for FABRIK solver in straight-line configuration"
+version: "1.0"
+category: "fundamental_block"
+level: 1
+
+inputs:
+  - name: "num_segments"
+    type: "int"
+    description: "Number of robot segments in the kinematic chain"
+    constraints: "Positive integer, reasonable upper limit (≤1000)"
+
+outputs:
+  - name: "initial_joints"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Joint positions array for FABRIK solver (num_segments + 2 joints)"
+  - name: "joint_distances"
+    type: "std::vector<double>"
+    description: "Euclidean distances between consecutive joints"
+  - name: "num_segments"
+    type: "int"
+    description: "Input validation echo"
+  - name: "num_joints"
+    type: "int"
+    description: "Calculated joint count (num_segments + 2)"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for calculation in milliseconds"
+  - name: "initialization_successful"
+    type: "bool"
+    description: "Success flag for error handling"
+  - name: "error_message"
+    type: "std::string"
+    description: "Error description if initialization failed"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "WORKING_HEIGHT"
+  - "MIN_HEIGHT"
+  - "MOTOR_LIMIT"
+
+internal_blocks:
+  - "None"
+
+performance:
+  typical_time_range: "0.01-0.1ms"
+
+algorithm:
+  segment_to_joint_formula: "num_joints = num_segments + 2"
+  joint_spacing:
+    - "J0: Base at origin [0, 0, 0]"
+    - "J1: First joint at [0, 0, 73.0] (WORKING_HEIGHT + MIN_HEIGHT/2 + MOTOR_LIMIT)"
+    - "J2-Jn-1: Middle joints spaced 146.0 apart (2×WORKING_HEIGHT + MIN_HEIGHT + 2×MOTOR_LIMIT)"
+    - "Jn: Last joint at +73.0 from previous (WORKING_HEIGHT + MIN_HEIGHT/2 + MOTOR_LIMIT)"
+  
+configuration:
+  type: "straight_line"
+  prismatic_positions: "All at rest (0 extension)"
+  direction: "Vertical Z+ axis alignment"
+
+example_output:
+  num_segments: 7
+  num_joints: 9
+  joint_positions:
+    - "J0: [0, 0, 0]"
+    - "J1: [0, 0, 73]"
+    - "J2: [0, 0, 219]"
+    - "J3: [0, 0, 365]"
+    - "J4: [0, 0, 511]"
+    - "J5: [0, 0, 657]"
+    - "J6: [0, 0, 803]"
+    - "J7: [0, 0, 949]"
+    - "J8: [0, 0, 1022]"
+  joint_distances: "[73, 146, 146, 146, 146, 146, 146, 73]"
+
+integration:
+  fabrik_solver: "Provides initial_joints and joint_distances for FABRIK iteration"
+  segment_block: "Compatible with calculate_essential_from_joints() interface"
+  
+future_expansion:
+  - "create_bent_chain() for pre-curved configurations"
+  - "Configurable base position offset"
+  - "Variable segment spacing patterns"
+
+notes:
+  - "Level 1 fundamental block - no dependencies on other blocks"
+  - "Creates deterministic straight-line configuration"
+  - "All prismatic actuators at rest position (0 extension)"
+  - "Joint array directly compatible with FABRIK solver input"
+  - "Distance array used for FABRIK constraint validation"
+  - "Matches Python FABRIK implementation exactly"
+  - "Memory-efficient with reserve() calls"
+  - "Comprehensive input validation and error handling"

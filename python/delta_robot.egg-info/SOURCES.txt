@@ -1,9 +1,7 @@
 setup.py
 cpp/bindings/bindings.cpp
-cpp/blocks/cone_constraint_block.cpp
-cpp/blocks/fabrik_backward_block.cpp
-cpp/blocks/fabrik_forward_block.cpp
 cpp/blocks/fabrik_initialization_block.cpp
+cpp/blocks/fabrik_iteration_block.cpp
 cpp/blocks/fabrik_solver_block.cpp
 cpp/blocks/fermat_block.cpp
 cpp/blocks/joint_state_block.cpp

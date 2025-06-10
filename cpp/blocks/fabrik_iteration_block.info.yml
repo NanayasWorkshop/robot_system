@@ -1,0 +1,126 @@
+# fabrik_iteration_block.info.yml
+name: "FABRIK Iteration Block"
+description: "Performs single FABRIK iteration with backward and forward passes using strict cone constraints"
+version: "1.0"
+category: "composite_block"
+level: 2
+
+inputs:
+  - name: "current_joints"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Current joint positions array"
+    constraints: "Non-empty, size must be joint_distances.size() + 1"
+  - name: "target_position"
+    type: "Eigen::Vector3d"
+    description: "Target position for end-effector"
+    constraints: "Any valid 3D position"
+  - name: "joint_distances"
+    type: "std::vector<double>"
+    description: "Distance constraints between consecutive joints"
+    constraints: "Non-empty, all positive values, size = joints.size() - 1"
+
+outputs:
+  - name: "updated_joints"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Joint positions after one complete FABRIK iteration"
+  - name: "distance_to_target"
+    type: "double"
+    description: "Euclidean distance from final end-effector to target"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for complete iteration in milliseconds"
+  - name: "iteration_successful"
+    type: "bool"
+    description: "Success flag for error handling"
+  - name: "error_message"
+    type: "std::string"
+    description: "Error description if iteration failed"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "SPHERICAL_JOINT_CONE_ANGLE_RAD"
+
+internal_blocks:
+  - "None"
+
+performance:
+  typical_time_range: "0.1-0.5ms"
+
+algorithm:
+  type: "FABRIK (Forward And Backward Reaching Inverse Kinematics)"
+  steps:
+    - "Backward Pass: Move end-effector to target, position joints from tip to base"
+    - "Forward Pass: Fix base position, position joints from base to tip"
+    - "Cone Constraints: Applied at each joint during both passes"
+    - "Distance Preservation: Strict enforcement of joint distances"
+  
+  backward_pass:
+    - "Step 1: Place end-effector at target position"
+    - "Step 2: For each joint from tip to base:"
+    - "  - If second-to-last joint: No cone constraint, place at exact distance"
+    - "  - Otherwise: Apply cone constraint, project to cone surface, place at exact distance"
+  
+  forward_pass:
+    - "Step 1: Fix base joint at original position"
+    - "Step 2: For each joint from base to tip:"
+    - "  - If first joint: No cone constraint, place at exact distance"
+    - "  - Otherwise: Apply cone constraint, project to cone surface, place at exact distance"
+
+cone_constraints:
+  angle: "120 degrees full cone (60 degrees half-angle)"
+  source: "SPHERICAL_JOINT_CONE_ANGLE_RAD constant"
+  enforcement: "Strict - directions outside cone projected to cone surface"
+  algorithm:
+    - "Calculate angle between desired direction and cone axis"
+    - "If inside cone: Use direction as-is"
+    - "If outside cone: Project onto cone surface using geometric projection"
+
+distance_preservation:
+  enforcement: "Strict - joints placed at exact distances"
+  formula: "new_joint = apex + normalized_direction * exact_distance"
+  
+vector_utilities:
+  - "vector_subtract() - Eigen vector subtraction wrapper"
+  - "vector_magnitude() - Eigen norm wrapper"
+  - "vector_distance() - Euclidean distance between points"
+  - "normalize_vector() - Safe normalization with zero-vector handling"
+  - "vector_dot() - Eigen dot product wrapper"
+  - "angle_between_vectors() - Angle calculation with clamping"
+
+cone_utilities:
+  - "is_inside_cone() - Check if direction within cone constraints"
+  - "project_onto_cone() - Geometric projection to cone surface"
+
+validation:
+  input_checks:
+    - "Non-empty joint and distance arrays"
+    - "Array size consistency (distances = joints - 1)"
+    - "Positive distance values"
+  
+error_handling:
+  - "Graceful exception handling with descriptive messages"
+  - "Timing preservation even on failure"
+  - "Success flag for easy error checking"
+
+integration:
+  fabrik_solver: "Called iteratively until convergence or max iterations"
+  initialization: "Uses output from FabrikInitializationBlock"
+  
+implementation_notes:
+  - "Pure FABRIK algorithm - no SegmentBlock dependencies"
+  - "Matches Python implementation exactly"
+  - "Uses Eigen for all vector operations"
+  - "Cone half-angle calculated from full cone constant"
+  - "Base joint always preserved during forward pass"
+  - "Zero-vector safe normalization"
+
+notes:
+  - "Level 2 composite block - no dependencies on other custom blocks"
+  - "Single iteration - not a complete solver"
+  - "Strict constraint enforcement - no tolerance allowed"
+  - "Memory efficient - reuses input arrays where possible"
+  - "Thread-safe - no static state"

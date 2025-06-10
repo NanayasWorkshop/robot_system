@@ -1,0 +1,150 @@
+# fabrik_solver_block.info.yml
+name: "FABRIK Solver Block"
+description: "High-level FABRIK solver with iterative convergence management and complete pipeline integration"
+version: "1.0"
+category: "aggregate_block"
+level: 3
+
+inputs:
+  - name: "target_position"
+    type: "Eigen::Vector3d"
+    description: "Target position for end-effector"
+    constraints: "Any finite 3D position, reachability validated internally"
+  - name: "num_segments"
+    type: "int"
+    description: "Number of robot segments in kinematic chain"
+    constraints: "Positive integer, defaults to DEFAULT_ROBOT_SEGMENTS (7)"
+  - name: "tolerance"
+    type: "double"
+    description: "Convergence tolerance for distance to target"
+    constraints: "Positive value, defaults to FABRIK_TOLERANCE (0.01)"
+  - name: "max_iterations"
+    type: "int"
+    description: "Maximum iterations before termination"
+    constraints: "Positive integer, defaults to FABRIK_MAX_ITERATIONS (100)"
+
+outputs:
+  - name: "final_joints"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Final joint positions after solving"
+  - name: "iterations_used"
+    type: "int"
+    description: "Number of iterations performed before convergence or termination"
+  - name: "final_distance_to_target"
+    type: "double"
+    description: "Remaining Euclidean distance from end-effector to target"
+  - name: "converged"
+    type: "bool"
+    description: "True if solution converged within tolerance"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Total solving time including all block calls"
+  - name: "solving_successful"
+    type: "bool"
+    description: "Success flag for error handling"
+  - name: "error_message"
+    type: "std::string"
+    description: "Error description if solving failed"
+  - name: "initialization_data"
+    type: "FabrikInitResult"
+    description: "Complete initialization data for reference"
+  - name: "initial_joints"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Starting joint positions from initialization"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "blocks/fabrik_initialization_block.hpp"
+  - "blocks/fabrik_iteration_block.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "DEFAULT_ROBOT_SEGMENTS"
+  - "FABRIK_TOLERANCE"
+  - "FABRIK_MAX_ITERATIONS"
+
+internal_blocks:
+  - "FabrikInitializationBlock"
+  - "FabrikIterationBlock"
+
+performance:
+  typical_time_range: "1-50ms (depending on iterations and convergence)"
+
+algorithm:
+  type: "Complete FABRIK Pipeline"
+  steps:
+    - "Step 1: Input validation (target, segments, tolerance, iterations)"
+    - "Step 2: Initialize straight-line joint chain"
+    - "Step 3: Optional reachability validation"
+    - "Step 4: Iterative solving until convergence or max iterations"
+    - "Step 5: Result packaging with complete metadata"
+  
+  convergence_criteria:
+    - "Distance to target <= tolerance"
+    - "Checked before first iteration and after each iteration"
+    - "Early termination on convergence"
+  
+  reachability_check:
+    - "Calculate maximum reach = sum of all joint distances"
+    - "Compare target distance to max reach with 10% buffer"
+    - "Optional safety check to prevent impossible targets"
+
+solving_loop:
+  initialization: "FabrikInitializationBlock::create_straight_chain(num_segments)"
+  iteration: "FabrikIterationBlock::iterate(current_joints, target, joint_distances)"
+  convergence: "distance_to_target <= tolerance"
+  termination: "convergence OR iterations >= max_iterations"
+
+validation:
+  input_validation:
+    - "Target position: finite values, no NaN/infinity"
+    - "Number of segments: 1-1000 range"
+    - "Tolerance: positive, reasonable range (0-1000)"
+    - "Max iterations: positive, reasonable range (1-10000)"
+  
+  reachability_validation:
+    - "Optional check: target_distance <= max_reach * 1.1"
+    - "10% buffer for numerical tolerance and flexibility"
+    - "Can be disabled for advanced use cases"
+
+error_handling:
+  types:
+    - "Input validation failures"
+    - "Initialization failures"
+    - "Individual iteration failures"
+    - "Unexpected exceptions during solving"
+  
+  strategy:
+    - "Graceful error handling with descriptive messages"
+    - "Timing preservation even on failure"
+    - "Success flags for easy error checking"
+    - "Complete error context provided"
+
+integration:
+  python_wrapper: "High-level solve() function for Python interface"
+  visualization: "Result data compatible with joint/segment visualizers"
+  testing: "Direct test interface with target specification"
+
+example_usage:
+  typical_call: "solve([80, 30, 400], 7, 0.01, 100)"
+  expected_output:
+    - "final_joints: 9 joint positions for 7 segments"
+    - "iterations_used: 1-50 typical range"
+    - "converged: true for reachable targets"
+    - "calculation_time_ms: 1-50ms typical range"
+
+performance_characteristics:
+  convergence_speed: "1-10 iterations for typical targets"
+  unreachable_targets: "Maximum iterations reached, converged=false"
+  edge_cases: "Graceful handling of degenerate or extreme targets"
+  
+notes:
+  - "Level 3 aggregate block - highest level FABRIK interface"
+  - "Complete pipeline integration with all lower-level blocks"
+  - "Production-ready with comprehensive error handling"
+  - "Configurable parameters with sensible defaults"
+  - "Optional reachability validation for safety"
+  - "Complete metadata for debugging and analysis"
+  - "Thread-safe - no static state between calls"
+  - "Memory efficient - reuses joint arrays where possible"

@@ -8,6 +8,9 @@
 #include "../blocks/joint_state_block.hpp"
 #include "../blocks/orientation_block.hpp"
 #include "../blocks/segment_block.hpp"
+#include "../blocks/fabrik_initialization_block.hpp"
+#include "../blocks/fabrik_iteration_block.hpp"
+#include "../blocks/fabrik_solver_block.hpp"
 
 namespace py = pybind11;
 
@@ -139,4 +142,46 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
                               result.orientation_data.has_value());
     }, "Calculate segment with full analysis from FABRIK joints (with J→S conversion)",
        py::arg("joint_positions"), py::arg("segment_index"));
+    
+    // ===== FABRIK INITIALIZATION BLOCK =====
+    m.def("create_fabrik_straight_chain", [](int num_segments) {
+        auto result = delta::FabrikInitializationBlock::create_straight_chain(num_segments);
+        return std::make_tuple(result.initial_joints, result.joint_distances, 
+                              result.num_segments, result.num_joints,
+                              result.calculation_time_ms, result.initialization_successful, 
+                              result.error_message);
+    }, "Create straight-line FABRIK joint chain initialization");
+    
+    // ===== FABRIK ITERATION BLOCK =====
+    m.def("fabrik_iterate", [](const std::vector<Eigen::Vector3d>& current_joints,
+                              const Eigen::Vector3d& target_position,
+                              const std::vector<double>& joint_distances) {
+        auto result = delta::FabrikIterationBlock::iterate(current_joints, target_position, joint_distances);
+        return std::make_tuple(result.updated_joints, result.distance_to_target,
+                              result.calculation_time_ms, result.iteration_successful,
+                              result.error_message);
+    }, "Perform single FABRIK iteration with cone constraints");
+    
+    // ===== FABRIK SOLVER BLOCK =====
+    m.def("fabrik_solve", [](const Eigen::Vector3d& target_position,
+                            int num_segments = delta::DEFAULT_ROBOT_SEGMENTS,
+                            double tolerance = delta::FABRIK_TOLERANCE,
+                            int max_iterations = delta::FABRIK_MAX_ITERATIONS) {
+        auto result = delta::FabrikSolverBlock::solve(target_position, num_segments, tolerance, max_iterations);
+        auto init_tuple = std::make_tuple(result.initialization_data.initial_joints, 
+                                         result.initialization_data.joint_distances,
+                                         result.initialization_data.num_segments,
+                                         result.initialization_data.num_joints,
+                                         result.initialization_data.calculation_time_ms,
+                                         result.initialization_data.initialization_successful,
+                                         result.initialization_data.error_message);
+        return std::make_tuple(result.final_joints, result.iterations_used,
+                              result.final_distance_to_target, result.converged,
+                              result.calculation_time_ms, result.solving_successful,
+                              result.error_message, init_tuple, result.initial_joints);
+    }, "Complete FABRIK solving with iterative convergence",
+       py::arg("target_position"), 
+       py::arg("num_segments") = delta::DEFAULT_ROBOT_SEGMENTS,
+       py::arg("tolerance") = delta::FABRIK_TOLERANCE,
+       py::arg("max_iterations") = delta::FABRIK_MAX_ITERATIONS);
 }
