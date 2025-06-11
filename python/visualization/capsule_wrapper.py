@@ -1,21 +1,173 @@
 """
-Capsule Creation Block Python Wrapper - FIXED VERSION
-Pure visualization wrapper - calls C++ and plots results
+Capsule Creation Block Python Wrapper - Clean Version
+Real capsule visualization using cylinders with hemispherical caps
 """
 
 import numpy as np
 from base_plotter import create_base_3d_figure, add_robot_base_circle, ROBOT_COLORS
 import plotly.graph_objects as go
-
 import delta_robot_cpp
 
-def visualize_capsule_chain(s_points: list, capsules: list, robot_radius: float) -> None:
-    """Visualize S-points and created capsule chain"""
+
+def create_capsule_mesh(start_point, end_point, radius, resolution=12):
+    """Create a proper capsule mesh with cylindrical body and hemispherical caps"""
+    start = np.array(start_point)
+    end = np.array(end_point)
     
-    # Create base figure with coordinate system
-    fig = create_base_3d_figure(f"Capsule Creation Block - {len(capsules)} Capsules from {len(s_points)} S-Points")
+    # Calculate direction and length
+    direction = end - start
+    length = np.linalg.norm(direction)
     
-    # Add robot base circle for reference
+    if length < 1e-6:
+        return None, None, None, None  # Degenerate capsule
+    
+    # Normalize direction
+    axis = direction / length
+    
+    # Find perpendicular vectors
+    if abs(axis[2]) < 0.9:
+        v1 = np.cross(axis, [0, 0, 1])
+    else:
+        v1 = np.cross(axis, [1, 0, 0])
+    v1 = v1 / np.linalg.norm(v1)
+    v2 = np.cross(axis, v1)
+    
+    vertices = []
+    faces = []
+    
+    # 1. Create cylinder body vertices
+    for i in range(resolution):
+        angle = 2 * np.pi * i / resolution
+        
+        # Bottom circle
+        bottom = start + radius * (np.cos(angle) * v1 + np.sin(angle) * v2)
+        vertices.append(bottom)
+        
+        # Top circle  
+        top = end + radius * (np.cos(angle) * v1 + np.sin(angle) * v2)
+        vertices.append(top)
+    
+    # 2. Create hemisphere vertices
+    hemisphere_res = resolution // 2
+    
+    # Bottom hemisphere (pointing towards start)
+    for j in range(1, hemisphere_res + 1):
+        phi = np.pi * j / (hemisphere_res + 1)  # 0 to pi/2
+        
+        for i in range(resolution):
+            angle = 2 * np.pi * i / resolution
+            
+            # Sphere coordinates
+            x = radius * np.sin(phi) * np.cos(angle)
+            y = radius * np.sin(phi) * np.sin(angle)
+            z = -radius * np.cos(phi)  # Negative for bottom hemisphere
+            
+            # Transform to world coordinates
+            point = start + x * v1 + y * v2 + z * axis
+            vertices.append(point)
+    
+    # Top hemisphere (pointing towards end)
+    for j in range(1, hemisphere_res + 1):
+        phi = np.pi * j / (hemisphere_res + 1)  # 0 to pi/2
+        
+        for i in range(resolution):
+            angle = 2 * np.pi * i / resolution
+            
+            # Sphere coordinates
+            x = radius * np.sin(phi) * np.cos(angle)
+            y = radius * np.sin(phi) * np.sin(angle)
+            z = radius * np.cos(phi)  # Positive for top hemisphere
+            
+            # Transform to world coordinates
+            point = end + x * v1 + y * v2 + z * axis
+            vertices.append(point)
+    
+    # Add center points for hemisphere caps
+    vertices.append(start)  # Bottom center
+    vertices.append(end)    # Top center
+    
+    vertices = np.array(vertices)
+    
+    # 3. Create faces
+    
+    # Cylinder side faces
+    for i in range(resolution):
+        next_i = (i + 1) % resolution
+        
+        # Two triangles per side face
+        faces.append([2*i, 2*i+1, 2*next_i])
+        faces.append([2*next_i, 2*i+1, 2*next_i+1])
+    
+    # Bottom hemisphere faces
+    bottom_center_idx = len(vertices) - 2
+    bottom_ring_start = 2 * resolution
+    
+    # Connect bottom circle to first hemisphere ring
+    for i in range(resolution):
+        next_i = (i + 1) % resolution
+        faces.append([2*i, bottom_ring_start + i, 2*next_i])
+        faces.append([2*next_i, bottom_ring_start + i, bottom_ring_start + next_i])
+    
+    # Hemisphere rings
+    for j in range(hemisphere_res - 1):
+        for i in range(resolution):
+            next_i = (i + 1) % resolution
+            
+            curr_ring = bottom_ring_start + j * resolution
+            next_ring = bottom_ring_start + (j + 1) * resolution
+            
+            faces.append([curr_ring + i, next_ring + i, curr_ring + next_i])
+            faces.append([curr_ring + next_i, next_ring + i, next_ring + next_i])
+    
+    # Connect last hemisphere ring to center
+    last_ring = bottom_ring_start + (hemisphere_res - 1) * resolution
+    for i in range(resolution):
+        next_i = (i + 1) % resolution
+        faces.append([last_ring + i, bottom_center_idx, last_ring + next_i])
+    
+    # Top hemisphere faces (similar pattern)
+    top_center_idx = len(vertices) - 1
+    top_ring_start = bottom_ring_start + hemisphere_res * resolution
+    
+    # Connect top circle to first hemisphere ring
+    for i in range(resolution):
+        next_i = (i + 1) % resolution
+        faces.append([2*i+1, 2*next_i+1, top_ring_start + i])
+        faces.append([2*next_i+1, top_ring_start + next_i, top_ring_start + i])
+    
+    # Top hemisphere rings
+    for j in range(hemisphere_res - 1):
+        for i in range(resolution):
+            next_i = (i + 1) % resolution
+            
+            curr_ring = top_ring_start + j * resolution
+            next_ring = top_ring_start + (j + 1) * resolution
+            
+            faces.append([curr_ring + i, curr_ring + next_i, next_ring + i])
+            faces.append([curr_ring + next_i, next_ring + next_i, next_ring + i])
+    
+    # Connect last top hemisphere ring to center
+    last_top_ring = top_ring_start + (hemisphere_res - 1) * resolution
+    for i in range(resolution):
+        next_i = (i + 1) % resolution
+        faces.append([last_top_ring + i, last_top_ring + next_i, top_center_idx])
+    
+    faces = np.array(faces)
+    
+    x = vertices[:, 0]
+    y = vertices[:, 1]
+    z = vertices[:, 2]
+    i = faces[:, 0]
+    j = faces[:, 1]
+    k = faces[:, 2]
+    
+    return x, y, z, (i, j, k)
+
+
+def visualize_capsule_chain(s_points, capsules, robot_radius):
+    """Visualize S-points and capsule chain using proper cylinder meshes"""
+    
+    fig = create_base_3d_figure(f"Capsule Chain - {len(capsules)} Capsules")
     add_robot_base_circle(fig, delta_robot_cpp.ROBOT_RADIUS)
     
     # Plot S-points
@@ -24,201 +176,85 @@ def visualize_capsule_chain(s_points: list, capsules: list, robot_radius: float)
     s_z = [pos[2] for pos in s_points]
     
     fig.add_trace(go.Scatter3d(
-        x=s_x,
-        y=s_y,
-        z=s_z,
+        x=s_x, y=s_y, z=s_z,
         mode='markers+text+lines',
-        marker=dict(size=10, color=ROBOT_COLORS['segment_points'], symbol='diamond'),
-        line=dict(color=ROBOT_COLORS['segment_chain'], width=3, dash='dot'),
+        marker=dict(size=8, color='red'),
+        line=dict(color='gray', width=2, dash='dot'),
         text=[f'S{i}' for i in range(len(s_points))],
         textposition='top center',
-        name='S-Point Chain'
+        name='S-Points'
     ))
     
-    # Plot capsules as cylinders
+    # Plot capsules as proper cylinder meshes
     for i, capsule in enumerate(capsules):
         start = capsule['start_point']
         end = capsule['end_point']
         radius = capsule['radius']
         
-        # Create cylinder representation
-        # Direction vector
-        direction = np.array(end) - np.array(start)
-        length = np.linalg.norm(direction)
+        # Create capsule mesh with rounded ends
+        mesh_data = create_capsule_mesh(start, end, radius)
         
-        if length > 0:
-            # Normalized direction
-            dir_norm = direction / length
+        if mesh_data[0] is not None:
+            x, y, z, faces = mesh_data
+            face_i, face_j, face_k = faces
             
-            # Create cylinder points along the capsule
-            t_values = np.linspace(0, 1, 20)
-            cylinder_points = []
-            
-            for t in t_values:
-                center = np.array(start) + t * direction
-                
-                # Create circle perpendicular to direction
-                # Find two perpendicular vectors to direction
-                if abs(dir_norm[2]) < 0.9:
-                    v1 = np.cross(dir_norm, [0, 0, 1])
-                else:
-                    v1 = np.cross(dir_norm, [1, 0, 0])
-                v1 = v1 / np.linalg.norm(v1)
-                v2 = np.cross(dir_norm, v1)
-                v2 = v2 / np.linalg.norm(v2)
-                
-                # Create circle points
-                circle_angles = np.linspace(0, 2*np.pi, 12)
-                for angle in circle_angles:
-                    point = center + radius * (np.cos(angle) * v1 + np.sin(angle) * v2)
-                    cylinder_points.append(point)
-            
-            # Plot cylinder as surface
-            if cylinder_points:
-                points_array = np.array(cylinder_points)
-                
-                # Plot as scatter points for simplicity
-                fig.add_trace(go.Scatter3d(
-                    x=points_array[:, 0],
-                    y=points_array[:, 1],
-                    z=points_array[:, 2],
-                    mode='markers',
-                    marker=dict(size=2, color=f'rgba(255, 165, 0, 0.3)'),
-                    name=f'Capsule {i+1}' if i == 0 else None,
-                    showlegend=(i == 0)
-                ))
+            # Add the mesh
+            fig.add_trace(go.Mesh3d(
+                x=x, y=y, z=z,
+                i=face_i, j=face_j, k=face_k,
+                color='lightblue',
+                opacity=0.7,
+                name=f'Capsule {i+1}' if i == 0 else None,
+                showlegend=(i == 0)
+            ))
         
-        # Plot capsule centerline
+        # Add centerline for reference
         fig.add_trace(go.Scatter3d(
             x=[start[0], end[0]],
-            y=[start[1], end[1]],
+            y=[start[1], end[1]], 
             z=[start[2], end[2]],
             mode='lines',
-            line=dict(color='orange', width=8),
-            name=f'Capsule {i+1} Center' if i == 0 else None,
-            showlegend=(i == 0)
-        ))
-        
-        # Plot capsule endpoints
-        fig.add_trace(go.Scatter3d(
-            x=[start[0], end[0]],
-            y=[start[1], end[1]],
-            z=[start[2], end[2]],
-            mode='markers',
-            marker=dict(size=8, color=['red', 'blue'], symbol='circle'),
-            name=f'Capsule {i+1} Endpoints' if i == 0 else None,
+            line=dict(color='orange', width=4),
+            name='Centerlines' if i == 0 else None,
             showlegend=(i == 0)
         ))
     
     fig.show()
-    
-    # Print results
-    print(f"\n=== Capsule Creation Block Results ===")
-    print(f"Input S-Points: {len(s_points)}")
-    print(f"Created Capsules: {len(capsules)}")
-    print(f"Robot Radius: {robot_radius:.3f}mm")
-    
-    total_length = 0.0
-    for i, capsule in enumerate(capsules):
-        length = capsule['length']
-        total_length += length
-        print(f"Capsule {i+1}: Length={length:.3f}mm, Radius={capsule['radius']:.3f}mm")
-    
-    print(f"Total Chain Length: {total_length:.3f}mm")
 
 
-def create_capsule_chain(s_points: list, robot_radius: float, debug: bool = False):
-    """
-    Create capsule chain from S-points using C++ implementation
-    
-    Args:
-        s_points: List of S-point positions as [x, y, z] arrays or tuples
-        robot_radius: Radius for all capsules in millimeters
-        debug: If True, show visualization
-        
-    Returns:
-        Tuple of (capsules, total_chain_length, calculation_time_ms, creation_successful, error_message)
-        
-    Raises:
-        ValueError: If input constraints are violated
-    """
+def create_capsule_chain(s_points, robot_radius, debug=False):
+    """Create capsule chain from S-points using C++ implementation"""
     
     try:
-        # FIXED: Convert to list of numpy arrays with proper dtype
-        s_point_vectors = []
-        for i, pos in enumerate(s_points):
-            # Convert each position to numpy array with float64 dtype
-            np_pos = np.array(pos, dtype=np.float64)
-            s_point_vectors.append(np_pos)
-            
-            if debug:
-                print(f"S-point {i}: {np_pos} (type: {type(np_pos)}, dtype: {np_pos.dtype})")
+        # Convert to numpy arrays
+        s_point_vectors = [np.array(pos, dtype=np.float64) for pos in s_points]
         
-        if debug:
-            print(f"Total S-points prepared for C++: {len(s_point_vectors)}")
-            print(f"Robot radius: {robot_radius} (type: {type(robot_radius)})")
-        
-        # Call C++ implementation - validation happens in C++
-        # FIXED: Pass the converted vectors directly - pybind11 with stl.h should handle the conversion
+        # Call C++ implementation
         result = delta_robot_cpp.create_capsule_chain(s_point_vectors, float(robot_radius))
-        capsules, total_chain_length, calculation_time_ms, creation_successful, error_message = result
+        capsules_cpp, total_length, calc_time, success, error_msg = result
         
-        if debug:
-            print(f"C++ call result: success={creation_successful}, error='{error_message}'")
-            print(f"Returned {len(capsules) if capsules else 0} capsules")
-        
-        # Convert capsules to Python-friendly format
-        capsule_list = []
-        if creation_successful and capsules:
-            for capsule in capsules:
-                capsule_dict = {
+        # Convert to Python format
+        capsules = []
+        if success and capsules_cpp:
+            for capsule in capsules_cpp:
+                capsules.append({
                     'start_point': np.array(capsule.start_point),
                     'end_point': np.array(capsule.end_point),
                     'radius': capsule.radius,
                     'length': capsule.length
-                }
-                capsule_list.append(capsule_dict)
+                })
         
-        # Optionally visualize
-        if debug and creation_successful and len(capsule_list) > 0:
-            visualize_capsule_chain(s_points, capsule_list, robot_radius)
-        
-        # Print results if debug mode
         if debug:
-            print(f"\n=== Capsule Creation Block Results ===")
-            print(f"Input S-Points: {len(s_points)}")
-            print(f"Robot Radius: {robot_radius:.3f}mm")
-            print(f"Created Capsules: {len(capsule_list)}")
-            print(f"Total Chain Length: {total_chain_length:.3f}mm")
-            print(f"Calculation Time: {calculation_time_ms:.3f}ms")
-            print(f"Status: {'SUCCESS' if creation_successful else 'FAILED'}")
-            if not creation_successful:
-                print(f"Error: {error_message}")
+            print(f"Created {len(capsules)} capsules, Total length: {total_length:.1f}mm")
         
-        return capsule_list, total_chain_length, calculation_time_ms, creation_successful, error_message
+        return capsules, total_length, calc_time, success, error_msg
         
     except Exception as e:
-        if debug:
-            import traceback
-            traceback.print_exc()
-        raise ValueError(f"Capsule creation failed: {str(e)}")
+        return [], 0.0, 0.0, False, str(e)
 
 
-def update_capsule_positions(existing_capsules: list, new_s_points: list, debug: bool = False):
-    """
-    Update existing capsule positions with new S-points using C++ implementation
-    
-    Args:
-        existing_capsules: List of existing capsule dictionaries
-        new_s_points: List of new S-point positions as [x, y, z] arrays or tuples
-        debug: If True, show visualization
-        
-    Returns:
-        Tuple of (updated_capsules, total_chain_length, calculation_time_ms, creation_successful, error_message)
-        
-    Raises:
-        ValueError: If input constraints are violated
-    """
+def update_capsule_positions(existing_capsules, new_s_points, debug=False):
+    """Update existing capsule positions with new S-points"""
     
     try:
         # Convert existing capsules to C++ format
@@ -231,45 +267,28 @@ def update_capsule_positions(existing_capsules: list, new_s_points: list, debug:
             cpp_capsule.length = capsule['length']
             cpp_capsules.append(cpp_capsule)
         
-        # FIXED: Convert new S-points to numpy arrays with proper dtype
-        s_point_vectors = []
-        for pos in new_s_points:
-            np_pos = np.array(pos, dtype=np.float64)
-            s_point_vectors.append(np_pos)
+        # Convert new S-points
+        s_point_vectors = [np.array(pos, dtype=np.float64) for pos in new_s_points]
         
         # Call C++ implementation
         result = delta_robot_cpp.update_capsule_positions(cpp_capsules, s_point_vectors)
-        capsules, total_chain_length, calculation_time_ms, creation_successful, error_message = result
+        capsules_cpp, total_length, calc_time, success, error_msg = result
         
-        # Convert updated capsules to Python-friendly format
-        updated_capsule_list = []
-        if creation_successful and capsules:
-            for capsule in capsules:
-                capsule_dict = {
+        # Convert to Python format
+        updated_capsules = []
+        if success and capsules_cpp:
+            for capsule in capsules_cpp:
+                updated_capsules.append({
                     'start_point': np.array(capsule.start_point),
                     'end_point': np.array(capsule.end_point),
                     'radius': capsule.radius,
                     'length': capsule.length
-                }
-                updated_capsule_list.append(capsule_dict)
+                })
         
-        # Optionally visualize
-        if debug and creation_successful and len(updated_capsule_list) > 0:
-            visualize_capsule_chain(new_s_points, updated_capsule_list, updated_capsule_list[0]['radius'])
-        
-        # Print results if debug mode
         if debug:
-            print(f"\n=== Capsule Update Block Results ===")
-            print(f"Input Capsules: {len(existing_capsules)}")
-            print(f"New S-Points: {len(new_s_points)}")
-            print(f"Updated Capsules: {len(updated_capsule_list)}")
-            print(f"Total Chain Length: {total_chain_length:.3f}mm")
-            print(f"Calculation Time: {calculation_time_ms:.3f}ms")
-            print(f"Status: {'SUCCESS' if creation_successful else 'FAILED'}")
-            if not creation_successful:
-                print(f"Error: {error_message}")
+            print(f"Updated {len(updated_capsules)} capsules, Total length: {total_length:.1f}mm")
         
-        return updated_capsule_list, total_chain_length, calculation_time_ms, creation_successful, error_message
+        return updated_capsules, total_length, calc_time, success, error_msg
         
     except Exception as e:
-        raise ValueError(f"Capsule update failed: {str(e)}")
+        return [], 0.0, 0.0, False, str(e)
