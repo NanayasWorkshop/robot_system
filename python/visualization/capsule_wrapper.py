@@ -1,5 +1,5 @@
 """
-Capsule Creation Block Python Wrapper
+Capsule Creation Block Python Wrapper - FIXED VERSION
 Pure visualization wrapper - calls C++ and plots results
 """
 
@@ -144,12 +144,28 @@ def create_capsule_chain(s_points: list, robot_radius: float, debug: bool = Fals
     """
     
     try:
-        # Convert to list of Eigen vectors for C++
-        s_point_vectors = [np.array(pos, dtype=float) for pos in s_points]
+        # FIXED: Convert to list of numpy arrays with proper dtype
+        s_point_vectors = []
+        for i, pos in enumerate(s_points):
+            # Convert each position to numpy array with float64 dtype
+            np_pos = np.array(pos, dtype=np.float64)
+            s_point_vectors.append(np_pos)
+            
+            if debug:
+                print(f"S-point {i}: {np_pos} (type: {type(np_pos)}, dtype: {np_pos.dtype})")
+        
+        if debug:
+            print(f"Total S-points prepared for C++: {len(s_point_vectors)}")
+            print(f"Robot radius: {robot_radius} (type: {type(robot_radius)})")
         
         # Call C++ implementation - validation happens in C++
-        result = delta_robot_cpp.create_capsule_chain(s_point_vectors, robot_radius)
+        # FIXED: Pass the converted vectors directly - pybind11 with stl.h should handle the conversion
+        result = delta_robot_cpp.create_capsule_chain(s_point_vectors, float(robot_radius))
         capsules, total_chain_length, calculation_time_ms, creation_successful, error_message = result
+        
+        if debug:
+            print(f"C++ call result: success={creation_successful}, error='{error_message}'")
+            print(f"Returned {len(capsules) if capsules else 0} capsules")
         
         # Convert capsules to Python-friendly format
         capsule_list = []
@@ -164,7 +180,7 @@ def create_capsule_chain(s_points: list, robot_radius: float, debug: bool = Fals
                 capsule_list.append(capsule_dict)
         
         # Optionally visualize
-        if debug and creation_successful:
+        if debug and creation_successful and len(capsule_list) > 0:
             visualize_capsule_chain(s_points, capsule_list, robot_radius)
         
         # Print results if debug mode
@@ -182,6 +198,9 @@ def create_capsule_chain(s_points: list, robot_radius: float, debug: bool = Fals
         return capsule_list, total_chain_length, calculation_time_ms, creation_successful, error_message
         
     except Exception as e:
+        if debug:
+            import traceback
+            traceback.print_exc()
         raise ValueError(f"Capsule creation failed: {str(e)}")
 
 
@@ -212,8 +231,11 @@ def update_capsule_positions(existing_capsules: list, new_s_points: list, debug:
             cpp_capsule.length = capsule['length']
             cpp_capsules.append(cpp_capsule)
         
-        # Convert new S-points to Eigen vectors
-        s_point_vectors = [np.array(pos, dtype=float) for pos in new_s_points]
+        # FIXED: Convert new S-points to numpy arrays with proper dtype
+        s_point_vectors = []
+        for pos in new_s_points:
+            np_pos = np.array(pos, dtype=np.float64)
+            s_point_vectors.append(np_pos)
         
         # Call C++ implementation
         result = delta_robot_cpp.update_capsule_positions(cpp_capsules, s_point_vectors)
@@ -232,7 +254,7 @@ def update_capsule_positions(existing_capsules: list, new_s_points: list, debug:
                 updated_capsule_list.append(capsule_dict)
         
         # Optionally visualize
-        if debug and creation_successful:
+        if debug and creation_successful and len(updated_capsule_list) > 0:
             visualize_capsule_chain(new_s_points, updated_capsule_list, updated_capsule_list[0]['radius'])
         
         # Print results if debug mode

@@ -1,14 +1,34 @@
 #!/usr/bin/env python3
 """
-Capsule Creation Block Test Runner - Complete Pipeline Test
+Capsule Creation Block Test Runner - FIXED VERSION
+Complete Pipeline Test with proper debugging
 """
 
 import sys
 sys.path.append('python/visualization')
 
-from capsule_wrapper import create_capsule_chain, update_capsule_positions, visualize_capsule_chain
-import delta_robot_cpp
+# Test imports first
+try:
+    from capsule_wrapper import create_capsule_chain, update_capsule_positions, visualize_capsule_chain
+    print("✓ Successfully imported capsule wrapper functions")
+except ImportError as e:
+    print(f"❌ Failed to import capsule wrapper: {e}")
+    sys.exit(1)
+
+try:
+    import delta_robot_cpp
+    print("✓ Successfully imported delta_robot_cpp")
+except ImportError as e:
+    print(f"❌ Failed to import delta_robot_cpp: {e}")
+    sys.exit(1)
+
 import numpy as np
+
+def are_points_equal(point1, point2, tolerance=1e-6):
+    """Check if two 3D points are equal within tolerance"""
+    return (abs(point1[0] - point2[0]) < tolerance and 
+            abs(point1[1] - point2[1]) < tolerance and 
+            abs(point1[2] - point2[2]) < tolerance)
 
 def test_pipeline_integration():
     """Test complete pipeline: Target → FABRIK → Joints → S-points → Capsules"""
@@ -56,29 +76,42 @@ def test_pipeline_integration():
             prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = segment_result
             
             if success and calc_seg_pos is not None:
-                s_points.append(calc_seg_pos)
-                successful_segments += 1
+                # Convert to regular Python list for consistency
+                s_point = [float(calc_seg_pos[0]), float(calc_seg_pos[1]), float(calc_seg_pos[2])]
+                
+                # FIXED: Check for duplicate consecutive S-points
+                if len(s_points) == 0 or not are_points_equal(s_points[-1], s_point, tolerance=1e-6):
+                    s_points.append(s_point)
+                    successful_segments += 1
+                    print(f"  ✓ S{len(s_points)-1}: ({s_point[0]:.3f}, {s_point[1]:.3f}, {s_point[2]:.3f})")
+                else:
+                    print(f"  ○ S{segment_idx}: Duplicate point, skipped ({s_point[0]:.3f}, {s_point[1]:.3f}, {s_point[2]:.3f})")
             else:
                 print(f"  ❌ Segment {segment_idx} failed: {error_msg}")
                 
         except Exception as e:
             print(f"  ❌ Segment {segment_idx} error: {e}")
     
-    if successful_segments == 0:
-        print("❌ No S-points extracted")
+    if len(s_points) < 2:
+        print(f"❌ Insufficient unique S-points: {len(s_points)} (need at least 2)")
         return
         
-    print(f"✓ Extracted {len(s_points)} S-points from {successful_segments}/{num_segments} segments")
-    print(f"  S0: ({s_points[0][0]:.3f}, {s_points[0][1]:.3f}, {s_points[0][2]:.3f})")
-    print(f"  S{len(s_points)-1}: ({s_points[-1][0]:.3f}, {s_points[-1][1]:.3f}, {s_points[-1][2]:.3f})")
+    print(f"✓ Extracted {len(s_points)} unique S-points from {successful_segments} successful segments")
     
     # Step 3: Create capsule chain
     print(f"\nStep 3: Capsule Creation")
     robot_radius = delta_robot_cpp.ROBOT_RADIUS
     
+    print(f"Debug info:")
+    print(f"  Number of S-points: {len(s_points)}")
+    print(f"  S-points type: {type(s_points)}")
+    print(f"  First S-point: {s_points[0]}")
+    print(f"  Robot radius: {robot_radius}")
+    
     try:
+        # FIXED: Call the function with proper debugging
         capsules, total_length, calc_time, success, error_msg = create_capsule_chain(
-            s_points, robot_radius, debug=False
+            s_points, robot_radius, debug=True
         )
         
         if not success:
@@ -96,6 +129,8 @@ def test_pipeline_integration():
         
     except Exception as e:
         print(f"❌ Capsule creation error: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Step 4: Save results for next pipeline step
@@ -186,9 +221,14 @@ def test_capsule_update():
             prismatic_length, calc_time, success, error_msg, calc_seg_pos, calc_dir = segment_result
             
             if success and calc_seg_pos is not None:
-                new_s_points.append(calc_seg_pos)
+                # Convert to regular Python list for consistency
+                s_point = [float(calc_seg_pos[0]), float(calc_seg_pos[1]), float(calc_seg_pos[2])]
+                
+                # FIXED: Check for duplicate consecutive S-points
+                if len(new_s_points) == 0 or not are_points_equal(new_s_points[-1], s_point, tolerance=1e-6):
+                    new_s_points.append(s_point)
         
-        print(f"✓ Extracted {len(new_s_points)} new S-points")
+        print(f"✓ Extracted {len(new_s_points)} unique new S-points")
         
     except Exception as e:
         print(f"❌ New FABRIK error: {e}")
@@ -255,10 +295,46 @@ def test_error_cases():
         print(f"Exception caught: {e}")
 
 
+def test_simple_capsule_creation():
+    """Test capsule creation with simple data to isolate the issue"""
+    print("\n" + "=" * 50)
+    print("SIMPLE CAPSULE CREATION TEST")
+    print("=" * 50)
+    
+    # Simple test data
+    simple_s_points = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 20.0],
+        [20.0, 10.0, 40.0]
+    ]
+    robot_radius = 25.0
+    
+    print(f"Testing with {len(simple_s_points)} simple S-points:")
+    for i, point in enumerate(simple_s_points):
+        print(f"  S{i}: {point}")
+    
+    try:
+        result = create_capsule_chain(simple_s_points, robot_radius, debug=True)
+        capsules, total_length, calc_time, success, error_msg = result
+        
+        if success:
+            print(f"✓ Simple test succeeded: {len(capsules)} capsules, {total_length:.3f}mm total")
+        else:
+            print(f"❌ Simple test failed: {error_msg}")
+            
+    except Exception as e:
+        print(f"❌ Simple test exception: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
     """Run all tests"""
-    print("CAPSULE CREATION BLOCK COMPREHENSIVE TEST")
+    print("CAPSULE CREATION BLOCK COMPREHENSIVE TEST (FIXED VERSION)")
     print("=" * 70)
+    
+    # Run simple test first to isolate any issues
+    test_simple_capsule_creation()
     
     # Run all test categories
     test_pipeline_integration()
