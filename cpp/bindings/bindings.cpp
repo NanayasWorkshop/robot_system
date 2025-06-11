@@ -2,7 +2,7 @@
 #include <pybind11/eigen.h>
 #include <pybind11/stl.h>
 
-// Include only existing blocks
+// Include existing blocks
 #include "../blocks/fermat_block.hpp"
 #include "../blocks/kinematics_block.hpp"
 #include "../blocks/joint_state_block.hpp"
@@ -12,10 +12,13 @@
 #include "../blocks/fabrik_iteration_block.hpp"
 #include "../blocks/fabrik_solver_block.hpp"
 
+// Include new collision blocks
+#include "../collision_blocks/capsule_creation_block.hpp"
+
 namespace py = pybind11;
 
 PYBIND11_MODULE(delta_robot_cpp, m) {
-    m.doc() = "Delta Robot C++ Modules - Clean Block-Based Architecture with Prismatic Refinement";
+    m.doc() = "Delta Robot C++ Modules - Clean Block-Based Architecture with Prismatic Refinement and Collision Avoidance";
     
     // ===== CONSTANTS =====
     m.attr("ROBOT_RADIUS") = delta::ROBOT_RADIUS;
@@ -41,6 +44,14 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
         .def_readwrite("u_axis", &delta::CoordinateFrame::u_axis)
         .def_readwrite("v_axis", &delta::CoordinateFrame::v_axis)
         .def_readwrite("w_axis", &delta::CoordinateFrame::w_axis);
+    
+    // ===== COLLISION DATA STRUCTURES =====
+    py::class_<delta::CapsuleData>(m, "CapsuleData")
+        .def(py::init<>())
+        .def_readwrite("start_point", &delta::CapsuleData::start_point)
+        .def_readwrite("end_point", &delta::CapsuleData::end_point)
+        .def_readwrite("radius", &delta::CapsuleData::radius)
+        .def_readwrite("length", &delta::CapsuleData::length);
     
     // ===== FERMAT BLOCK =====
     m.def("calculate_fermat", [](double x, double y, double z) {
@@ -221,4 +232,22 @@ PYBIND11_MODULE(delta_robot_cpp, m) {
        py::arg("max_fabrik_iterations") = delta::FABRIK_MAX_ITERATIONS,
        py::arg("prismatic_tolerance") = delta::FABRIK_PRISMATIC_TOLERANCE,
        py::arg("max_refinement_iterations") = delta::FABRIK_MAX_REFINEMENT_ITERATIONS);
+
+    // ===== CAPSULE CREATION BLOCK =====
+    m.def("create_capsule_chain", [](const std::vector<Eigen::Vector3d>& s_points, double robot_radius) {
+        auto result = delta::CapsuleCreationBlock::create_capsule_chain(s_points, robot_radius);
+        return std::make_tuple(result.capsules, result.total_chain_length,
+                              result.calculation_time_ms, result.creation_successful,
+                              result.error_message);
+    }, "Create capsule chain from S-points",
+       py::arg("s_points"), py::arg("robot_radius"));
+    
+    m.def("update_capsule_positions", [](const std::vector<delta::CapsuleData>& existing_capsules,
+                                        const std::vector<Eigen::Vector3d>& new_s_points) {
+        auto result = delta::CapsuleCreationBlock::update_capsule_positions(existing_capsules, new_s_points);
+        return std::make_tuple(result.capsules, result.total_chain_length,
+                              result.calculation_time_ms, result.creation_successful,
+                              result.error_message);
+    }, "Update existing capsule positions with new S-points",
+       py::arg("existing_capsules"), py::arg("new_s_points"));
 }

@@ -1,0 +1,97 @@
+name: "Capsule Creation Block"
+description: "Creates robot capsule colliders from S-point chain geometry"
+version: "1.0"
+category: "level_0_block"
+level: 0
+
+inputs:
+  - name: "s_points"
+    type: "std::vector<Eigen::Vector3d>"
+    description: "Chain of S-points from segment calculations"
+    constraints: "Non-empty, size >= 2, finite values, non-degenerate segments"
+  - name: "robot_radius"
+    type: "double"
+    description: "Robot capsule radius in millimeters"
+    constraints: "Positive, finite value"
+
+outputs:
+  - name: "capsules"
+    type: "std::vector<CapsuleData>"
+    description: "Array of capsule colliders between consecutive S-points"
+  - name: "total_chain_length"
+    type: "double"
+    description: "Sum of all capsule lengths in millimeters"
+  - name: "calculation_time_ms"
+    type: "double"
+    description: "Time taken for capsule creation in milliseconds"
+  - name: "creation_successful"
+    type: "bool"
+    description: "Success flag for error handling"
+  - name: "error_message"
+    type: "std::string"
+    description: "Error description if creation failed"
+
+dependencies:
+  - "core/constants.hpp"
+  - "core/timing.hpp"
+  - "Eigen/Dense"
+
+constants_used:
+  - "ROBOT_RADIUS (via input parameter)"
+
+internal_blocks:
+  - "None"
+
+performance:
+  typical_time_range: "0.01-0.1ms"
+
+algorithm:
+  type: "Direct Geometry Conversion"
+  steps:
+    - "Input validation: Check S-points and radius"
+    - "Capsule creation: Generate capsule between each consecutive S-point pair"
+    - "Length calculation: Compute individual and total chain lengths"
+    - "Result packaging: Return structured capsule data"
+
+capsule_structure:
+  start_point: "First S-point of segment"
+  end_point: "Second S-point of segment"
+  radius: "Robot radius (constant for all capsules)"
+  length: "Euclidean distance between start and end points"
+
+validation:
+  s_points_checks:
+    - "Minimum 2 points required"
+    - "All coordinates must be finite"
+    - "No consecutive duplicate points (non-degenerate segments)"
+  
+  radius_checks:
+    - "Must be positive value"
+    - "Must be finite (no NaN/infinity)"
+
+update_functionality:
+  purpose: "Efficiently update capsule positions without recreating geometry"
+  constraints: "New S-points count must match existing capsules + 1"
+  preservation: "Maintains original radius values from existing capsules"
+
+error_handling:
+  - "Graceful exception handling with descriptive messages"
+  - "Timing preservation even on failure"
+  - "Success flag for easy error checking"
+
+integration:
+  input_source: "SegmentBlock S-point calculations"
+  output_usage: "CollisionDetectionBlock input geometry"
+  
+implementation_notes:
+  - "Pure Level 0 block - no dependencies on other custom blocks"
+  - "Geometry-only conversion - no physics or dynamics"
+  - "Memory efficient - reserves vector capacity"
+  - "Thread-safe - no static state"
+  - "Validation-first design for robust operation"
+
+notes:
+  - "Clean interface for collision detection pipeline"
+  - "Efficient position updates for real-time applications"
+  - "No hardcoded values - all parameters passed explicitly"
+  - "Designed for 120Hz update rates with minimal overhead"
