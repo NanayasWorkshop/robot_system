@@ -2,6 +2,7 @@
 build/
 cpp/build/
 python/delta_robot.egg-info/
+delta_env/
 
 # Compiled Python files
 __pycache__/
