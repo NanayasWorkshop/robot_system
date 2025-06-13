@@ -14,16 +14,23 @@
 #include "../cpp/collision/collision_detection_engine.hpp"
 #include "../cpp/collision/layer_manager.hpp"
 
+// NEW: STAR vertex loader
+#include "../cpp/utils/vertex_loader.hpp"
+
 using namespace delta;
 
 /**
- * Real Collision System Test with Moving Target
+ * Real Collision System Test with Moving Target (Updated with STAR Vertices)
  * Tests complete pipeline: Moving Target → FABRIK → Bridges → Collision Detection → Visualization
  */
 class MovingTargetTest {
 private:
     DataPublisher publisher_;
     std::unique_ptr<CollisionDetectionEngine> collision_engine_;
+    
+    // STAR vertex data
+    std::vector<Eigen::Vector3d> star_vertices_;
+    std::vector<Eigen::Vector3d> star_joints_;
     
     int frame_count_;
     double animation_time_;
@@ -51,18 +58,21 @@ public:
         }
         std::cout << "✅ DataPublisher initialized" << std::endl;
         
-        // Initialize collision detection engine
-        collision_engine_ = std::make_unique<CollisionDetectionEngine>();
-        
-        // Create minimal T-pose mesh vertices for collision system
-        auto base_vertices = create_t_pose_mesh_vertices();
-        
-        if (!collision_engine_->initialize("collision_data.h5", base_vertices)) {
-            std::cerr << "❌ Failed to initialize CollisionDetectionEngine" << std::endl;
-            std::cerr << "   Make sure collision_data.h5 exists (run your main compilation script first)" << std::endl;
+        // NEW: Load real STAR vertices
+        if (!load_star_vertices()) {
+            std::cerr << "❌ Failed to load STAR vertices" << std::endl;
             return false;
         }
-        std::cout << "✅ CollisionDetectionEngine initialized" << std::endl;
+        
+        // Initialize collision detection engine with real vertices
+        collision_engine_ = std::make_unique<CollisionDetectionEngine>();
+        
+        if (!collision_engine_->initialize("collision_data.h5", star_vertices_)) {
+            std::cerr << "❌ Failed to initialize CollisionDetectionEngine" << std::endl;
+            std::cerr << "   Make sure collision_data.h5 exists and matches STAR vertex count" << std::endl;
+            return false;
+        }
+        std::cout << "✅ CollisionDetectionEngine initialized with real STAR vertices" << std::endl;
         
         std::cout << "✅ Moving Target Test ready!" << std::endl;
         return true;
@@ -72,7 +82,7 @@ public:
         std::cout << "🎬 Starting moving target animation..." << std::endl;
         std::cout << "   Target: Circle orbit (radius=" << orbit_radius_ << "mm, speed=" << orbit_speed_ << "rps)" << std::endl;
         std::cout << "   Robot: " << num_segments_ << " segments, FABRIK solver" << std::endl;
-        std::cout << "   Human: Static T-pose" << std::endl;
+        std::cout << "   Human: Real STAR T-pose (" << star_vertices_.size() << " vertices)" << std::endl;
         std::cout << "   Press Ctrl+C to stop" << std::endl;
         std::cout << std::endl;
         
@@ -98,24 +108,23 @@ public:
                 continue;
             }
             
-            // Create static human T-pose
-            auto human_joints = create_t_pose_joints();
-            auto human_vertices = create_t_pose_mesh_vertices();
+            // Use real STAR data (T-pose for now, vertices already loaded)
+            // NOTE: For now we keep T-pose, but this is where dynamic STAR calls would go
             
             // Transform human to collision coordinates
-            auto star_bridge_result = STARCollisionBridge::transform_star_to_collision_coords(human_joints);
+            auto star_bridge_result = STARCollisionBridge::transform_star_to_collision_coords(star_joints_);
             if (!star_bridge_result.success) {
                 std::cerr << "⚠️  STAR bridge failed: " << star_bridge_result.error_message << std::endl;
                 continue;
             }
             
-            // Run collision detection
+            // Run collision detection with real STAR vertices
             auto collision_result = collision_engine_->detect_collisions(
                 star_bridge_result.data, robot_bridge_result.data);
             
             // Publish complete frame via visualization system
             bool publish_success = publisher_.publish_collision_frame(
-                robot_bridge_result.data, human_joints, human_vertices, 
+                robot_bridge_result.data, star_joints_, star_vertices_, 
                 collision_result, collision_result.computation_time_ms);
             
             if (!publish_success) {
@@ -141,6 +150,40 @@ public:
     
 private:
     
+    // NEW: Load real STAR vertices using VertexLoader
+    bool load_star_vertices() {
+        std::cout << "🔄 Loading STAR vertices..." << std::endl;
+        
+        // Load vertices using the VertexLoader utility
+        star_vertices_ = VertexLoader::load_or_generate_star_vertices(
+            "star_vertices.bin",    // Binary file path
+            "get_star_vertices.py"  // Python script path
+        );
+        
+        if (star_vertices_.empty()) {
+            std::cerr << "❌ Failed to load STAR vertices" << std::endl;
+            return false;
+        }
+        
+        // Validate vertex count
+        if (!VertexLoader::validate_vertices(star_vertices_, 6890)) {
+            std::cerr << "❌ STAR vertex validation failed" << std::endl;
+            return false;
+        }
+        
+        // Print vertex statistics
+        std::cout << VertexLoader::get_vertex_statistics(star_vertices_) << std::endl;
+        
+        // Create corresponding T-pose joints (simplified for now)
+        star_joints_ = create_star_t_pose_joints();
+        
+        std::cout << "✅ STAR vertices loaded successfully" << std::endl;
+        std::cout << "   Vertices: " << star_vertices_.size() << std::endl;
+        std::cout << "   Joints: " << star_joints_.size() << std::endl;
+        
+        return true;
+    }
+    
     Eigen::Vector3d calculate_target_position() {
         // Circular orbit around center point
         double angle = 2.0 * M_PI * orbit_speed_ * animation_time_;
@@ -158,62 +201,43 @@ private:
         return FabrikSolverBlock::solve(target, num_segments_, FABRIK_TOLERANCE, FABRIK_MAX_ITERATIONS);
     }
     
-    std::vector<Eigen::Vector3d> create_t_pose_joints() {
+    // UPDATED: Create proper STAR joint positions that match the vertex data
+    std::vector<Eigen::Vector3d> create_star_t_pose_joints() {
         std::vector<Eigen::Vector3d> joints;
         
-        // Standard T-pose for STAR model (24 joints in Y-up, meters)
-        // Convert to millimeters and Z-up for consistency
+        // Standard T-pose for STAR model (24 joints)
+        // These should correspond to the actual STAR joint positions
+        // STAR coordinate system: Y-up, meters
         
-        joints.push_back(Eigen::Vector3d(0, 0, 0));           // 0: pelvis
-        joints.push_back(Eigen::Vector3d(0, 200, 0));         // 1: spine1
-        joints.push_back(Eigen::Vector3d(0, 400, 0));         // 2: spine2
-        joints.push_back(Eigen::Vector3d(0, 600, 0));         // 3: spine3
-        joints.push_back(Eigen::Vector3d(0, 800, 0));         // 4: neck
-        joints.push_back(Eigen::Vector3d(0, 950, 0));         // 5: head
+        // NOTE: These are approximate T-pose positions
+        // For full accuracy, these should come from STAR joint regressor
         
-        // Left arm
-        joints.push_back(Eigen::Vector3d(-150, 750, 0));      // 6: left_shoulder
-        joints.push_back(Eigen::Vector3d(-300, 750, 0));      // 7: left_arm
-        joints.push_back(Eigen::Vector3d(-450, 750, 0));      // 8: left_forearm
-        joints.push_back(Eigen::Vector3d(-600, 750, 0));      // 9: left_hand
-        
-        // Right arm  
-        joints.push_back(Eigen::Vector3d(150, 750, 0));       // 10: right_shoulder
-        joints.push_back(Eigen::Vector3d(300, 750, 0));       // 11: right_arm
-        joints.push_back(Eigen::Vector3d(450, 750, 0));       // 12: right_forearm
-        joints.push_back(Eigen::Vector3d(600, 750, 0));       // 13: right_hand
-        
-        // Left leg
-        joints.push_back(Eigen::Vector3d(-100, 0, 0));        // 14: left_hip
-        joints.push_back(Eigen::Vector3d(-100, -400, 0));     // 15: left_thigh
-        joints.push_back(Eigen::Vector3d(-100, -800, 0));     // 16: left_shin
-        joints.push_back(Eigen::Vector3d(-100, -1000, 50));   // 17: left_foot
-        
-        // Right leg
-        joints.push_back(Eigen::Vector3d(100, 0, 0));         // 18: right_hip
-        joints.push_back(Eigen::Vector3d(100, -400, 0));      // 19: right_thigh
-        joints.push_back(Eigen::Vector3d(100, -800, 0));      // 20: right_shin
-        joints.push_back(Eigen::Vector3d(100, -1000, 50));    // 21: right_foot
-        
-        // Additional joints for STAR compatibility
-        joints.push_back(Eigen::Vector3d(-50, 200, 0));       // 22: spine_detail1
-        joints.push_back(Eigen::Vector3d(50, 200, 0));        // 23: spine_detail2
+        joints.push_back(Eigen::Vector3d(0.0, 0.0, 0.0));           // 0: pelvis
+        joints.push_back(Eigen::Vector3d(-0.1, 0.0, 0.0));         // 1: left_hip
+        joints.push_back(Eigen::Vector3d(0.1, 0.0, 0.0));          // 2: right_hip
+        joints.push_back(Eigen::Vector3d(0.0, 0.2, 0.0));          // 3: spine1
+        joints.push_back(Eigen::Vector3d(-0.1, -0.4, 0.0));        // 4: left_knee
+        joints.push_back(Eigen::Vector3d(0.1, -0.4, 0.0));         // 5: right_knee
+        joints.push_back(Eigen::Vector3d(0.0, 0.4, 0.0));          // 6: spine2
+        joints.push_back(Eigen::Vector3d(-0.1, -0.8, 0.0));        // 7: left_ankle
+        joints.push_back(Eigen::Vector3d(0.1, -0.8, 0.0));         // 8: right_ankle
+        joints.push_back(Eigen::Vector3d(0.0, 0.6, 0.0));          // 9: spine3
+        joints.push_back(Eigen::Vector3d(-0.1, -1.0, 0.05));       // 10: left_foot
+        joints.push_back(Eigen::Vector3d(0.1, -1.0, 0.05));        // 11: right_foot
+        joints.push_back(Eigen::Vector3d(0.0, 0.8, 0.0));          // 12: neck
+        joints.push_back(Eigen::Vector3d(-0.15, 0.75, 0.0));       // 13: left_collar
+        joints.push_back(Eigen::Vector3d(0.15, 0.75, 0.0));        // 14: right_collar
+        joints.push_back(Eigen::Vector3d(0.0, 0.95, 0.0));         // 15: head
+        joints.push_back(Eigen::Vector3d(-0.3, 0.75, 0.0));        // 16: left_shoulder
+        joints.push_back(Eigen::Vector3d(0.3, 0.75, 0.0));         // 17: right_shoulder
+        joints.push_back(Eigen::Vector3d(-0.45, 0.75, 0.0));       // 18: left_elbow
+        joints.push_back(Eigen::Vector3d(0.45, 0.75, 0.0));        // 19: right_elbow
+        joints.push_back(Eigen::Vector3d(-0.6, 0.75, 0.0));        // 20: left_wrist
+        joints.push_back(Eigen::Vector3d(0.6, 0.75, 0.0));         // 21: right_wrist
+        joints.push_back(Eigen::Vector3d(-0.65, 0.75, 0.0));       // 22: left_hand
+        joints.push_back(Eigen::Vector3d(0.65, 0.75, 0.0));        // 23: right_hand
         
         return joints;
-    }
-    
-    std::vector<Eigen::Vector3d> create_t_pose_mesh_vertices() {
-        std::vector<Eigen::Vector3d> vertices;
-        
-        // TODO: Load real STAR T-pose vertices that match the HDF5 file
-        // For now, return empty to avoid vertex count mismatch
-        // The collision system should handle this gracefully
-        
-        std::cout << "⚠️  Using empty vertex array (real STAR vertices not loaded)" << std::endl;
-        std::cout << "   HDF5 expects 6890 vertices from STAR model" << std::endl;
-        std::cout << "   Consider loading real STAR T-pose data for full functionality" << std::endl;
-        
-        return vertices; // Empty for now
     }
     
     void print_frame_statistics(const Eigen::Vector3d& target, 
@@ -234,15 +258,17 @@ private:
         
         std::cout << " | Packets: " << publisher_stats.network_stats.packets_sent
                   << " | Success: " << std::setprecision(1) << publisher_stats.network_stats.success_rate << "%"
+                  << " | STAR: " << star_vertices_.size() << " verts"
                   << std::endl;
     }
 };
 
 int main() {
-    std::cout << "🎯 MOVING TARGET COLLISION TEST" << std::endl;
-    std::cout << "================================" << std::endl;
+    std::cout << "🎯 MOVING TARGET COLLISION TEST (WITH REAL STAR VERTICES)" << std::endl;
+    std::cout << "==========================================================" << std::endl;
     std::cout << "Real-time collision detection with animated target" << std::endl;
     std::cout << "Pipeline: FABRIK → Bridges → Collision → Visualization" << std::endl;
+    std::cout << "STAR Integration: Real 6890 vertices from T-pose model" << std::endl;
     std::cout << std::endl;
     
     MovingTargetTest test;
