@@ -3,6 +3,10 @@ build/
 cpp/build/
 python/delta_robot.egg-info/
 delta_env/
+python/STAR/**
+star-robot-env/
+
+python/!STAR/README.md
 
 # Compiled Python files
 __pycache__/
