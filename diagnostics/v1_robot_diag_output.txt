@@ -1,0 +1,179 @@
+FABRIK → CAPSULE BRIDGE DIAGNOSTIC
+Extracting exact data formats for bridge design
+
+============================================================
+FABRIK OUTPUT DIAGNOSTIC
+============================================================
+Input Target: [80.0, 30.0, 400.0]
+
+FABRIK Result Structure:
+  Type: <class 'tuple'>
+  Length: 13
+  Success: True
+
+Joint Positions (9 joints):
+  Joint[0]: (   0.000,    0.000,    0.000)
+  Joint[1]: ( -22.286,   -8.357,   69.011)
+  Joint[2]: ( -70.520,  -26.445,  205.621)
+  Joint[3]: (-124.765,  -46.787,  339.635)
+  Joint[4]: (-166.034,  -62.263,  478.823)
+  Joint[5]: ( -92.944,  -34.854,  602.203)
+  Joint[6]: (  43.648,   16.368,  596.291)
+  Joint[7]: ( 107.150,   40.181,  466.999)
+  Joint[8]: (  80.002,   30.001,  400.004)
+
+FABRIK Metadata:
+  Final distance to target: 0.004839
+  Converged: True
+  Calculation time: 0.000ms
+  Iterations used: 12
+
+============================================================
+S-POINTS EXTRACTION DIAGNOSTIC
+============================================================
+Input: 9 joint positions
+Processing 8 segments...
+
+Segment 0:
+  Prismatic length: 0.468
+  Calculation time: 0.000ms
+  Success: True
+  S-point: ( -46.403,  -17.401,  137.316)
+  → Added as S-point[0]
+
+Segment 1:
+  Prismatic length: 0.000
+  Calculation time: 0.000ms
+  Success: True
+  S-point: ( -97.642,  -36.616,  272.628)
+  Distance to previous: 145.958931
+  → Added as S-point[1]
+
+Segment 2:
+  Prismatic length: -0.000
+  Calculation time: 0.000ms
+  Success: True
+  S-point: (-145.399,  -54.525,  409.229)
+  Distance to previous: 145.812525
+  → Added as S-point[2]
+
+Segment 3:
+  Prismatic length: -0.015
+  Calculation time: 0.000ms
+  Success: True
+  S-point: (-129.489,  -48.558,  540.513)
+  Distance to previous: 132.379269
+  → Added as S-point[3]
+
+Segment 4:
+  Prismatic length: -0.097
+  Calculation time: 0.000ms
+  Success: True
+  S-point: ( -24.648,   -9.243,  599.247)
+  Distance to previous: 126.439709
+  → Added as S-point[4]
+
+Segment 5:
+  Prismatic length: -0.081
+  Calculation time: 0.000ms
+  Success: True
+  S-point: (  75.399,   28.275,  531.645)
+  Distance to previous: 126.439709
+  → Added as S-point[5]
+
+Segment 6:
+  Prismatic length: -0.002
+  Calculation time: 0.000ms
+  Success: True
+  S-point: (  80.002,   30.001,  400.004)
+  Distance to previous: 131.732625
+  → Added as S-point[6]
+
+Segment 7:
+  Prismatic length: -0.000
+  Calculation time: 0.000ms
+  Success: True
+  S-point: (  80.002,   30.001,  400.004)
+  Distance to previous: 0.000000
+  → Skipped (duplicate)
+
+Final S-points (7 points):
+  S[0]: ( -46.403,  -17.401,  137.316)
+  S[1]: ( -97.642,  -36.616,  272.628)
+  S[2]: (-145.399,  -54.525,  409.229)
+  S[3]: (-129.489,  -48.558,  540.513)
+  S[4]: ( -24.648,   -9.243,  599.247)
+  S[5]: (  75.399,   28.275,  531.645)
+  S[6]: (  80.002,   30.001,  400.004)
+
+============================================================
+CAPSULE CREATION DIAGNOSTIC
+============================================================
+Robot radius: 24.8mm
+Input S-points: 7
+
+Capsule Creation Result:
+  Success: True
+  Calculation time: 0.000ms
+  Total length: 808.763mm
+
+Generated Capsules (6):
+  Capsule[0]:
+    Start:  ( -46.403,  -17.401,  137.316)
+    End:    ( -97.642,  -36.616,  272.628)
+    Radius:   24.800
+    Length:  145.959
+  Capsule[1]:
+    Start:  ( -97.642,  -36.616,  272.628)
+    End:    (-145.399,  -54.525,  409.229)
+    Radius:   24.800
+    Length:  145.813
+  Capsule[2]:
+    Start:  (-145.399,  -54.525,  409.229)
+    End:    (-129.489,  -48.558,  540.513)
+    Radius:   24.800
+    Length:  132.379
+  Capsule[3]:
+    Start:  (-129.489,  -48.558,  540.513)
+    End:    ( -24.648,   -9.243,  599.247)
+    Radius:   24.800
+    Length:  126.440
+  Capsule[4]:
+    Start:  ( -24.648,   -9.243,  599.247)
+    End:    (  75.399,   28.275,  531.645)
+    Radius:   24.800
+    Length:  126.440
+  Capsule[5]:
+    Start:  (  75.399,   28.275,  531.645)
+    End:    (  80.002,   30.001,  400.004)
+    Radius:   24.800
+    Length:  131.733
+
+============================================================
+BRIDGE REQUIREMENTS SUMMARY
+============================================================
+
+INPUT (from FABRIK):
+  - fabrik_result[0]: List of joint positions [(x,y,z), ...]
+  - fabrik_result[8]: success boolean
+  - fabrik_result[9]: error message string
+
+PROCESSING STEPS:
+  1. Extract S-points from joints using calculate_segment_essential_from_joints()
+  2. Filter duplicate consecutive S-points (distance < 1e-6)
+  3. Convert S-points to capsule chain using robot_radius
+
+OUTPUT (for Collision):
+  - Vector of CapsuleData structs
+  - Each capsule: start_point, end_point, radius, length
+  - Coordinate system: Same as FABRIK joints
+
+BRIDGE FUNCTION SIGNATURE:
+  std::vector<CapsuleData> convert_fabrik_to_capsules(
+    const FabrikSolverResult& fabrik_result,
+    double robot_radius = ROBOT_RADIUS)
+
+============================================================
+DIAGNOSTIC COMPLETE
+Use this output to design the C++ bridge
+============================================================
