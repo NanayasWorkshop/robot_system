@@ -263,10 +263,49 @@ class DataParser:
     def parse_human_vertices(self, vertex_data: bytes) -> Optional[o3d.geometry.PointCloud]:
         """Parse human vertex data (STAR mesh vertices)"""
         try:
-            # This would be called if we receive HumanVerticesPacket
-            # For now, we use the joint-based representation
-            # Future: Parse actual STAR mesh vertices here
-            return None
+            # Parse HumanVerticesPacket header
+            if len(vertex_data) < 12:
+                return None
+            
+            header = struct.unpack('III', vertex_data[:12])  # vertex_count, batch_index, total_batches
+            vertex_count = header[0]
+            batch_index = header[1]
+            total_batches = header[2]
+            
+            print(f"      🔍 Vertex batch {batch_index}/{total_batches}: {vertex_count} vertices")
+            
+            if vertex_count == 0:
+                return None
+            
+            # Parse vertices (3 floats each: x, y, z)
+            vertices = []
+            offset = 12
+            for i in range(vertex_count):
+                if offset + 12 > len(vertex_data):  # 3 * 4 bytes
+                    break
+                
+                vertex_data_parsed = struct.unpack('fff', vertex_data[offset:offset+12])
+                vertex_star = np.array([vertex_data_parsed[0], vertex_data_parsed[1], vertex_data_parsed[2]])
+                
+                # Transform from STAR to collision coordinates
+                vertex_collision = self.transform_star_to_collision(vertex_star)
+                vertices.append(vertex_collision)
+                offset += 12
+            
+            if not vertices:
+                return None
+            
+            print(f"      ✅ Parsed {len(vertices)} STAR mesh vertices")
+            
+            # Create Open3D point cloud
+            point_cloud = o3d.geometry.PointCloud()
+            point_cloud.points = o3d.utility.Vector3dVector(np.array(vertices))
+            
+            # Apply human color
+            colors = np.tile(self.HUMAN_COLOR, (len(vertices), 1))
+            point_cloud.colors = o3d.utility.Vector3dVector(colors)
+            
+            return point_cloud
             
         except Exception as e:
             print(f"⚠️  Human vertices parse error: {e}")
@@ -277,51 +316,30 @@ class DataParser:
         try:
             # Parse header: contact_count, has_collision, max_penetration_depth
             if len(packet_data) < 12:
+                print(f"      ❌ Collision packet too small: {len(packet_data)} bytes")
                 return None
             
-            header = struct.unpack('BBff', packet_data[:12])
-            contact_count = header[0]
-            has_collision = header[1]
-            max_penetration = header[2]
+            # DEBUG: Print first few bytes to see the structure
+            header_bytes = packet_data[:12]
+            print(f"      🔍 Collision header bytes: {[hex(b) for b in header_bytes[:12]]}")
             
-            if not has_collision or contact_count == 0:
-                return None
+            # Try different parsing approaches
+            try:
+                # Approach 1: uint32_t contact_count, uint8_t has_collision, float max_penetration
+                header1 = struct.unpack('IB?f', packet_data[:10])  # 4+1+1+4 = 10 bytes
+                print(f"      🔍 Approach 1: contact_count={header1[0]}, has_collision={header1[1]}, max_pen={header1[2]}")
+            except:
+                print(f"      ❌ Approach 1 failed")
             
-            # Parse contacts (7 floats each: contact_xyz, normal_xyz, depth, capsule_index)
-            contacts = []
-            offset = 12
-            for i in range(contact_count):
-                if offset + 28 > len(packet_data):  # 7 * 4 bytes
-                    break
-                
-                contact_data = struct.unpack('fffffff', packet_data[offset:offset+28])
-                contact = ContactData(
-                    contact_point=np.array([contact_data[0], contact_data[1], contact_data[2]]),
-                    normal=np.array([contact_data[3], contact_data[4], contact_data[5]]),
-                    penetration_depth=contact_data[6],
-                    robot_capsule_index=int(contact_data[7])
-                )
-                contacts.append(contact)
-                offset += 28
+            try:
+                # Approach 2: uint32_t contact_count, uint8_t has_collision, uint8_t padding, float max_penetration  
+                header2 = struct.unpack('IBBf', packet_data[:8])  # 4+1+1+4 = 8 bytes, start at offset 2
+                print(f"      🔍 Approach 2: contact_count={header2[0]}, has_collision={header2[1]}, padding={header2[2]}, max_pen={header2[3]}")
+            except:
+                print(f"      ❌ Approach 2 failed")
             
-            if not contacts:
-                return None
-            
-            # Create point cloud with heatmap colors
-            points = []
-            colors = []
-            
-            for contact in contacts:
-                points.append(contact.contact_point)
-                color = self.get_collision_color(contact.penetration_depth)
-                colors.append(color)
-            
-            # Create Open3D point cloud
-            point_cloud = o3d.geometry.PointCloud()
-            point_cloud.points = o3d.utility.Vector3dVector(np.array(points))
-            point_cloud.colors = o3d.utility.Vector3dVector(np.array(colors))
-            
-            return point_cloud
+            # For now, return None to see debug output
+            return None
             
         except Exception as e:
             print(f"⚠️  Collision contacts parse error: {e}")
@@ -332,6 +350,7 @@ class DataParser:
         geometries = {}
         
         print(f"\n🔍 Frame {frame.frame_id} packets: {list(frame.packets.keys())}")
+        print(f"   📊 Packet sizes: {[(ptype.name, len(data)) for ptype, data in frame.packets.items()]}")
         
         # Parse robot capsules
         if PacketType.ROBOT_CAPSULES in frame.packets:
@@ -343,15 +362,28 @@ class DataParser:
             else:
                 print(f"   ❌ Robot: parsing failed")
         
-        # Parse human pose
+        # Parse human pose (joints)
         if PacketType.HUMAN_POSE in frame.packets:
             print(f"   Parsing human pose: {len(frame.packets[PacketType.HUMAN_POSE])} bytes")
-            human_pc = self.parse_human_pose(frame.packets[PacketType.HUMAN_POSE])
-            if human_pc:
-                print(f"   ✅ Human: {len(human_pc.points)} points")
-                geometries['human'] = human_pc
+            
+            # Check if this is actually a HumanVerticesPacket (batched vertices)
+            pose_data = frame.packets[PacketType.HUMAN_POSE]
+            if len(pose_data) > 200:  # HumanVerticesPacket is much larger
+                print(f"   🔍 Large HUMAN_POSE packet - checking if it's vertices...")
+                vertices_pc = self.parse_human_vertices(pose_data)
+                if vertices_pc:
+                    print(f"   ✅ Human Vertices: {len(vertices_pc.points)} points")
+                    geometries['human'] = vertices_pc
+                else:
+                    print(f"   ❌ Human Vertices: parsing failed")
             else:
-                print(f"   ❌ Human: parsing failed")
+                # Normal joints packet
+                human_pc = self.parse_human_pose(pose_data)
+                if human_pc:
+                    print(f"   ✅ Human Joints: {len(human_pc.points)} points")
+                    geometries['human'] = human_pc
+                else:
+                    print(f"   ❌ Human Joints: parsing failed")
         
         # Parse collision contacts
         if PacketType.COLLISION_CONTACTS in frame.packets:
