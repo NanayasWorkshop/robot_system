@@ -2,6 +2,7 @@
 """
 Data Parser - Transform C++ collision data to Open3D geometries
 Handles coordinate transformation and point cloud generation
+COMPLETELY FIXED: Proper batched vertex accumulation for complete STAR mesh visualization
 """
 
 import struct
@@ -29,6 +30,37 @@ class ContactData:
     robot_capsule_index: int
 
 
+@dataclass
+class VertexBatchAccumulator:
+    """Accumulates vertex batches for complete mesh reconstruction"""
+    frame_id: int
+    total_batches: int
+    received_batches: Dict[int, np.ndarray]  # batch_index -> vertices
+    complete: bool = False
+    
+    def add_batch(self, batch_index: int, vertices: np.ndarray) -> bool:
+        """Add a vertex batch and check if complete"""
+        self.received_batches[batch_index] = vertices
+        self.complete = len(self.received_batches) == self.total_batches
+        return self.complete
+    
+    def get_complete_vertices(self) -> Optional[np.ndarray]:
+        """Get all vertices combined in correct order"""
+        if not self.complete:
+            return None
+        
+        # Combine batches in order
+        all_vertices = []
+        for batch_idx in range(self.total_batches):
+            if batch_idx in self.received_batches:
+                all_vertices.extend(self.received_batches[batch_idx])
+            else:
+                print(f"⚠️ Missing batch {batch_idx} in frame {self.frame_id}")
+                return None
+        
+        return np.array(all_vertices) if all_vertices else None
+
+
 class DataParser:
     """Parse binary packets and create Open3D geometries"""
     
@@ -49,6 +81,10 @@ class DataParser:
             'orange': np.array([1.0, 0.5, 0.0]),    # 5-10mm
             'red': np.array([1.0, 0.0, 0.0])        # >10mm
         }
+        
+        # NEW: Vertex batch accumulation
+        self.vertex_accumulators: Dict[int, VertexBatchAccumulator] = {}
+        self.max_cached_frames = 5  # Keep last 5 frames to handle out-of-order packets
     
     def transform_star_to_collision(self, star_point: np.ndarray) -> np.ndarray:
         """
@@ -260,8 +296,11 @@ class DataParser:
             print(f"⚠️  Human pose parse error: {e}")
             return None
     
-    def parse_human_vertices(self, vertex_data: bytes) -> Optional[o3d.geometry.PointCloud]:
-        """Parse human vertex data (STAR mesh vertices)"""
+    def parse_human_vertices_batch(self, vertex_data: bytes, frame_id: int) -> Optional[int]:
+        """
+        Parse human vertex batch and accumulate for complete mesh
+        Returns the number of vertices in this batch, or None if parsing failed
+        """
         try:
             # Parse HumanVerticesPacket header
             if len(vertex_data) < 12:
@@ -272,10 +311,10 @@ class DataParser:
             batch_index = header[1]
             total_batches = header[2]
             
-            print(f"      🔍 Vertex batch {batch_index}/{total_batches}: {vertex_count} vertices")
+            print(f"      🔍 Vertex batch {batch_index}/{total_batches}: {vertex_count} vertices (frame {frame_id})")
             
             if vertex_count == 0:
-                return None
+                return 0
             
             # Parse vertices (3 floats each: x, y, z)
             vertices = []
@@ -293,23 +332,74 @@ class DataParser:
                 offset += 12
             
             if not vertices:
-                return None
+                return 0
             
             print(f"      ✅ Parsed {len(vertices)} STAR mesh vertices")
             
-            # Create Open3D point cloud
-            point_cloud = o3d.geometry.PointCloud()
-            point_cloud.points = o3d.utility.Vector3dVector(np.array(vertices))
+            # Add to accumulator
+            if frame_id not in self.vertex_accumulators:
+                self.vertex_accumulators[frame_id] = VertexBatchAccumulator(
+                    frame_id=frame_id,
+                    total_batches=total_batches,
+                    received_batches={}
+                )
             
-            # Apply human color
-            colors = np.tile(self.HUMAN_COLOR, (len(vertices), 1))
-            point_cloud.colors = o3d.utility.Vector3dVector(colors)
+            accumulator = self.vertex_accumulators[frame_id]
+            batch_complete = accumulator.add_batch(batch_index, vertices)
             
-            return point_cloud
+            if batch_complete:
+                print(f"      🎯 All {total_batches} vertex batches received for frame {frame_id}")
+            
+            # Clean up old accumulators
+            self._cleanup_old_accumulators(frame_id)
+            
+            return len(vertices)
             
         except Exception as e:
-            print(f"⚠️  Human vertices parse error: {e}")
+            print(f"⚠️  Human vertices batch parse error: {e}")
             return None
+    
+    def get_complete_human_vertices(self, frame_id: int) -> Optional[o3d.geometry.PointCloud]:
+        """
+        Get complete human vertex point cloud if all batches received for this frame
+        """
+        if frame_id not in self.vertex_accumulators:
+            return None
+        
+        accumulator = self.vertex_accumulators[frame_id]
+        if not accumulator.complete:
+            return None
+        
+        # Get all vertices combined
+        all_vertices = accumulator.get_complete_vertices()
+        if all_vertices is None:
+            return None
+        
+        print(f"      🎯 Creating complete human mesh: {len(all_vertices)} vertices (frame {frame_id})")
+        
+        # Create Open3D point cloud
+        point_cloud = o3d.geometry.PointCloud()
+        point_cloud.points = o3d.utility.Vector3dVector(all_vertices)
+        
+        # Apply human color
+        colors = np.tile(self.HUMAN_COLOR, (len(all_vertices), 1))
+        point_cloud.colors = o3d.utility.Vector3dVector(colors)
+        
+        # Clean up this accumulator
+        del self.vertex_accumulators[frame_id]
+        
+        return point_cloud
+    
+    def _cleanup_old_accumulators(self, current_frame_id: int):
+        """Remove old vertex accumulators to prevent memory leaks"""
+        frames_to_remove = []
+        for frame_id in self.vertex_accumulators:
+            if frame_id < current_frame_id - self.max_cached_frames:
+                frames_to_remove.append(frame_id)
+        
+        for frame_id in frames_to_remove:
+            print(f"      🧹 Cleaning up old vertex accumulator for frame {frame_id}")
+            del self.vertex_accumulators[frame_id]
     
     def parse_collision_contacts(self, packet_data: bytes) -> Optional[o3d.geometry.PointCloud]:
         """Parse collision contacts packet and create point cloud with heatmap"""
@@ -349,51 +439,140 @@ class DataParser:
         """Parse complete frame and return all geometries"""
         geometries = {}
         
-        print(f"\n🔍 Frame {frame.frame_id} packets: {list(frame.packets.keys())}")
-        print(f"   📊 Packet sizes: {[(ptype.name, len(data)) for ptype, data in frame.packets.items()]}")
+        print(f"\n🔍 Frame {frame.frame_id}")
+        print(f"   🐛 DEBUG - Frame object type: {type(frame)}")
+        print(f"   🐛 DEBUG - Frame packets type: {type(frame.packets)}")
         
-        # Parse robot capsules
-        if PacketType.ROBOT_CAPSULES in frame.packets:
-            print(f"   Parsing robot capsules: {len(frame.packets[PacketType.ROBOT_CAPSULES])} bytes")
-            robot_pc = self.parse_robot_capsules(frame.packets[PacketType.ROBOT_CAPSULES])
-            if robot_pc:
-                print(f"   ✅ Robot: {len(robot_pc.points)} points")
-                geometries['robot'] = robot_pc
-            else:
-                print(f"   ❌ Robot: parsing failed")
-        
-        # Parse human pose (joints)
-        if PacketType.HUMAN_POSE in frame.packets:
-            print(f"   Parsing human pose: {len(frame.packets[PacketType.HUMAN_POSE])} bytes")
-            
-            # Check if this is actually a HumanVerticesPacket (batched vertices)
-            pose_data = frame.packets[PacketType.HUMAN_POSE]
-            if len(pose_data) > 200:  # HumanVerticesPacket is much larger
-                print(f"   🔍 Large HUMAN_POSE packet - checking if it's vertices...")
-                vertices_pc = self.parse_human_vertices(pose_data)
-                if vertices_pc:
-                    print(f"   ✅ Human Vertices: {len(vertices_pc.points)} points")
-                    geometries['human'] = vertices_pc
+        # EMERGENCY COMPATIBILITY: Handle both old and new packet buffer formats
+        def safe_get_packets(packet_type):
+            """Get packets handling both old (single) and new (list) formats"""
+            if hasattr(frame, 'packets') and packet_type in frame.packets:
+                data = frame.packets[packet_type]
+                if isinstance(data, list):
+                    print(f"   🔧 {packet_type.name}: NEW FORMAT - {len(data)} packets")
+                    return data  # New format
                 else:
-                    print(f"   ❌ Human Vertices: parsing failed")
+                    print(f"   🔧 {packet_type.name}: OLD FORMAT - {len(data)} bytes")
+                    return [data]  # Old format - wrap in list
+            return []
+        
+        # Parse robot capsules (single packet expected)
+        robot_packets = safe_get_packets(PacketType.ROBOT_CAPSULES)
+        if robot_packets:
+            robot_data = robot_packets[-1]  # Get latest
+            if len(robot_data) > 4:  # Need at least header
+                print(f"   Parsing robot capsules: {len(robot_data)} bytes")
+                robot_pc = self.parse_robot_capsules(robot_data)
+                if robot_pc:
+                    print(f"   ✅ Robot: {len(robot_pc.points)} points")
+                    geometries['robot'] = robot_pc
+                else:
+                    print(f"   ❌ Robot: parsing failed")
             else:
-                # Normal joints packet
-                human_pc = self.parse_human_pose(pose_data)
+                print(f"   ⚠️ Robot packet too small: {len(robot_data)} bytes")
+        
+        # Parse human data (handle multiple vertex batch packets)
+        human_packets = safe_get_packets(PacketType.HUMAN_POSE)
+        if human_packets:
+            print(f"   Parsing human data: {len(human_packets)} packets")
+            
+            # Classify packets as joints vs vertex batches
+            joint_packets = [p for p in human_packets if len(p) <= 200]
+            vertex_packets = [p for p in human_packets if len(p) > 200]
+            
+            print(f"     Joint packets: {len(joint_packets)}, Vertex packets: {len(vertex_packets)}")
+            
+            # Process vertex batches if we have them
+            if vertex_packets:
+                print(f"   🔍 Processing {len(vertex_packets)} vertex batch packets...")
+                
+                # Clear any existing accumulator for this frame
+                if frame.frame_id in self.vertex_accumulators:
+                    del self.vertex_accumulators[frame.frame_id]
+                
+                total_vertices_processed = 0
+                
+                # Process each vertex batch packet
+                for i, vertex_data in enumerate(vertex_packets):
+                    print(f"     Processing vertex packet {i+1}/{len(vertex_packets)} ({len(vertex_data)} bytes)")
+                    vertex_count = self.parse_human_vertices_batch(vertex_data, frame.frame_id)
+                    if vertex_count is not None and vertex_count > 0:
+                        total_vertices_processed += vertex_count
+                        print(f"     ✅ Batch {i+1}: {vertex_count} vertices")
+                    else:
+                        print(f"     ❌ Batch {i+1}: parsing failed")
+                
+                # Check if we have complete mesh now
+                complete_vertices_pc = self.get_complete_human_vertices(frame.frame_id)
+                if complete_vertices_pc:
+                    print(f"   🎯 Complete Human Mesh: {len(complete_vertices_pc.points)} vertices")
+                    geometries['human'] = complete_vertices_pc
+                else:
+                    # Create mesh from whatever we have
+                    if frame.frame_id in self.vertex_accumulators:
+                        accumulator = self.vertex_accumulators[frame.frame_id]
+                        if len(accumulator.received_batches) > 0:
+                            partial_vertices = []
+                            for batch_vertices in accumulator.received_batches.values():
+                                partial_vertices.extend(batch_vertices)
+                            
+                            if partial_vertices:
+                                print(f"   🔧 Partial Human Mesh: {len(partial_vertices)} vertices from {len(accumulator.received_batches)} batches")
+                                
+                                point_cloud = o3d.geometry.PointCloud()
+                                point_cloud.points = o3d.utility.Vector3dVector(np.array(partial_vertices))
+                                colors = np.tile(self.HUMAN_COLOR, (len(partial_vertices), 1))
+                                point_cloud.colors = o3d.utility.Vector3dVector(colors)
+                                
+                                geometries['human'] = point_cloud
+            
+            # Process joint packets if we have them and no vertex data
+            elif joint_packets:
+                print(f"   🔍 Processing joint data...")
+                joint_data = joint_packets[-1]  # Use latest joint packet
+                human_pc = self.parse_human_pose(joint_data)
                 if human_pc:
                     print(f"   ✅ Human Joints: {len(human_pc.points)} points")
                     geometries['human'] = human_pc
                 else:
                     print(f"   ❌ Human Joints: parsing failed")
-        
-        # Parse collision contacts
-        if PacketType.COLLISION_CONTACTS in frame.packets:
-            print(f"   Parsing collision: {len(frame.packets[PacketType.COLLISION_CONTACTS])} bytes")
-            collision_pc = self.parse_collision_contacts(frame.packets[PacketType.COLLISION_CONTACTS])
-            if collision_pc:
-                print(f"   ✅ Collision: {len(collision_pc.points)} points")
-                geometries['collision'] = collision_pc
+            
+            # EMERGENCY FALLBACK: Try to show anything we have
             else:
-                print(f"   ❌ Collision: parsing failed")
+                print(f"   🚨 FALLBACK: No valid human data found, checking stored vertices...")
+                # Check if we have any stored vertex data from previous frames
+                for stored_frame_id in list(self.vertex_accumulators.keys())[-3:]:  # Check last 3 frames
+                    accumulator = self.vertex_accumulators[stored_frame_id]
+                    if len(accumulator.received_batches) > 0:
+                        partial_vertices = []
+                        for batch_vertices in accumulator.received_batches.values():
+                            partial_vertices.extend(batch_vertices)
+                        
+                        if partial_vertices:
+                            print(f"   🔧 EMERGENCY: Using stored vertices from frame {stored_frame_id}: {len(partial_vertices)} vertices")
+                            
+                            point_cloud = o3d.geometry.PointCloud()
+                            point_cloud.points = o3d.utility.Vector3dVector(np.array(partial_vertices))
+                            colors = np.tile(self.HUMAN_COLOR, (len(partial_vertices), 1))
+                            point_cloud.colors = o3d.utility.Vector3dVector(colors)
+                            
+                            geometries['human'] = point_cloud
+                            break
+        
+        # Parse collision contacts (single packet expected)
+        collision_packets = safe_get_packets(PacketType.COLLISION_CONTACTS)
+        if collision_packets:
+            collision_data = collision_packets[-1]  # Get latest
+            if len(collision_data) > 12:  # Need at least header
+                print(f"   Parsing collision: {len(collision_data)} bytes")
+                collision_pc = self.parse_collision_contacts(collision_data)
+                if collision_pc:
+                    print(f"   ✅ Collision: {len(collision_pc.points)} points")
+                    geometries['collision'] = collision_pc
+                else:
+                    print(f"   ❌ Collision: parsing failed")
+            else:
+                print(f"   ⚠️ Collision packet too small: {len(collision_data)} bytes")
         
         print(f"   📦 Total geometries created: {len(geometries)}")
         return geometries

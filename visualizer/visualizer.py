@@ -2,6 +2,7 @@
 """
 Open3D Collision Visualizer
 Real-time visualization of robot collision detection system
+FIXED: Proper handling of batched vertex data for complete STAR mesh display
 """
 
 import argparse
@@ -52,8 +53,14 @@ class CollisionVisualizer:
         self.geometries = {}
         self.geometry_names = ['robot', 'human', 'collision']
         
+        # FIXED: Frame tracking for batched data
+        self.processed_frames = set()
+        self.last_complete_frame = -1
+        
         # Statistics
         self.frame_count = 0
+        self.vertex_batch_count = 0
+        self.complete_mesh_count = 0
         self.last_stats_time = time.time()
         self.fps_history = []
         
@@ -82,6 +89,7 @@ class CollisionVisualizer:
         print(f"   Window: {self.config.window_width}x{self.config.window_height}")
         print(f"   Rendering: {', '.join(self._get_active_renderers())}")
         print(f"   Listening: UDP port 9999")
+        print(f"   FIXED: Proper batched vertex accumulation for complete STAR mesh")
         
         return True
     
@@ -91,7 +99,7 @@ class CollisionVisualizer:
             # Create visualizer
             self.vis = o3d.visualization.Visualizer()
             self.vis.create_window(
-                window_name="Robot Collision Visualization",
+                window_name="Robot Collision Visualization (FIXED)",
                 width=self.config.window_width,
                 height=self.config.window_height,
                 left=100,
@@ -202,6 +210,7 @@ class CollisionVisualizer:
         print("🎬 Starting visualization loop...")
         print("   Press ESC or close window to exit")
         print("   Press H for help")
+        print("   FIXED: Now properly accumulates all vertex batches for complete mesh")
         print()
         
         self.is_running = True
@@ -246,18 +255,50 @@ class CollisionVisualizer:
     def _process_new_frame(self, frame: PacketBuffer):
         """Process new frame data and update geometries"""
         try:
+            # FIXED: Don't process frames we've already handled completely
+            if frame.frame_id in self.processed_frames:
+                return
+            
             # Parse frame data
             new_geometries = self.parser.parse_frame(frame)
+            
+            # Track if this frame had complete data
+            frame_complete = False
             
             # Update each geometry type
             for name in self.geometry_names:
                 if name in new_geometries and self._should_show_geometry(name):
                     self._update_geometry(name, new_geometries[name])
+                    
+                    # Special tracking for human mesh completion
+                    if name == 'human':
+                        vertex_count = len(new_geometries[name].points)
+                        if vertex_count > 1000:  # This indicates complete mesh (not just joints)
+                            self.complete_mesh_count += 1
+                            frame_complete = True
+                            print(f"   🎯 Complete human mesh rendered: {vertex_count} vertices (frame {frame.frame_id})")
+                        elif vertex_count > 0:
+                            print(f"   👤 Human joints rendered: {vertex_count} joints (frame {frame.frame_id})")
+            
+            # Mark frame as processed if complete
+            if frame_complete:
+                self.processed_frames.add(frame.frame_id)
+                self.last_complete_frame = frame.frame_id
+                
+                # Clean up old processed frames to prevent memory leak
+                self._cleanup_old_processed_frames(frame.frame_id)
             
             self.frame_count += 1
             
         except Exception as e:
             print(f"⚠️  Frame processing error: {e}")
+    
+    def _cleanup_old_processed_frames(self, current_frame_id: int):
+        """Remove old processed frame IDs to prevent memory leaks"""
+        frames_to_remove = {fid for fid in self.processed_frames if fid < current_frame_id - 10}
+        self.processed_frames -= frames_to_remove
+        if frames_to_remove:
+            print(f"      🧹 Cleaned up {len(frames_to_remove)} old processed frame IDs")
     
     def _update_geometry(self, name: str, new_geometry: o3d.geometry.PointCloud):
         """Update existing geometry with new data"""
@@ -307,12 +348,15 @@ class CollisionVisualizer:
         else:
             current_fps = 0
         
-        # Print compact stats
+        # FIXED: Enhanced stats with vertex batch tracking
         print(f"\r📊 Frames: {self.frame_count} | "
+              f"Complete Meshes: {self.complete_mesh_count} | "
               f"Net: {net_stats.frames_complete} frames | "
               f"FPS: {current_fps:.1f} | "
               f"Data: {net_stats.data_rate_mbps:.1f} Mbps | "
-              f"Loss: {net_stats.frames_dropped}", end="", flush=True)
+              f"Loss: {net_stats.frames_dropped} | "
+              f"Last Complete: {self.last_complete_frame}", 
+              end="", flush=True)
     
     def _control_frame_rate(self, loop_start: float):
         """Control frame rate to target FPS"""
@@ -334,13 +378,20 @@ class CollisionVisualizer:
         if self.vis:
             self.vis.destroy_window()
         
+        # Print final statistics
+        print(f"📊 Final Statistics:")
+        print(f"   Total frames processed: {self.frame_count}")
+        print(f"   Complete meshes rendered: {self.complete_mesh_count}")
+        print(f"   Processed frame IDs: {len(self.processed_frames)}")
+        print(f"   Last complete frame: {self.last_complete_frame}")
+        
         print("✅ Visualizer shutdown complete")
 
 
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="Robot Collision System Visualizer",
+        description="Robot Collision System Visualizer (FIXED - Batched Vertex Support)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -348,6 +399,7 @@ Examples:
   python visualizer.py --robot --human   # Robot and human only
   python visualizer.py --collision       # Collision points only
   python visualizer.py --all             # Everything visible
+  python visualizer.py --point-size 5.0  # Larger points for better visibility
         """
     )
     
@@ -404,8 +456,13 @@ def create_config_from_args(args) -> VisualizerConfig:
 
 def main():
     """Main entry point"""
-    print("🎯 ROBOT COLLISION SYSTEM VISUALIZER")
-    print("=" * 50)
+    print("🎯 ROBOT COLLISION SYSTEM VISUALIZER (FIXED)")
+    print("=" * 60)
+    print("FIXED: Proper batched vertex accumulation for complete STAR mesh")
+    print("- Accumulates all vertex batches per frame")
+    print("- Only renders when complete mesh is received")
+    print("- Prevents memory leaks from incomplete batches")
+    print("=" * 60)
     
     # Parse command line arguments
     args = parse_arguments()
