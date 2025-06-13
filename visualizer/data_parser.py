@@ -316,25 +316,71 @@ class DataParser:
             if vertex_count == 0:
                 return 0
             
+            # DEBUG: Check available data size
+            available_data = len(vertex_data) - 12  # Minus header
+            expected_data = vertex_count * 12  # 3 floats * 4 bytes each
+            print(f"      📊 Data check: Available={available_data} bytes, Expected={expected_data} bytes")
+            
+            if available_data < expected_data:
+                print(f"      ⚠️  Not enough data! Using {available_data // 12} vertices instead of {vertex_count}")
+                vertex_count = available_data // 12
+            
             # Parse vertices (3 floats each: x, y, z)
             vertices = []
             offset = 12
+            skipped_vertices = 0
+            parse_errors = 0
+            
             for i in range(vertex_count):
                 if offset + 12 > len(vertex_data):  # 3 * 4 bytes
+                    print(f"      💔 Ran out of data at vertex {i}")
                     break
                 
-                vertex_data_parsed = struct.unpack('fff', vertex_data[offset:offset+12])
-                vertex_star = np.array([vertex_data_parsed[0], vertex_data_parsed[1], vertex_data_parsed[2]])
+                try:
+                    vertex_data_parsed = struct.unpack('fff', vertex_data[offset:offset+12])
+                    vertex_star = np.array([vertex_data_parsed[0], vertex_data_parsed[1], vertex_data_parsed[2]])
+                    
+                    # Check for valid vertex data before transformation
+                    if not np.isfinite(vertex_star).all():
+                        skipped_vertices += 1
+                        if skipped_vertices <= 5:  # Only print first few
+                            print(f"      ⚠️  Vertex {i}: Invalid STAR coords {vertex_star}")
+                        offset += 12
+                        continue
+                    
+                    # Transform from STAR to collision coordinates
+                    vertex_collision = self.transform_star_to_collision(vertex_star)
+                    
+                    # Check for valid transformation result
+                    if not np.isfinite(vertex_collision).all():
+                        skipped_vertices += 1
+                        if skipped_vertices <= 5:  # Only print first few
+                            print(f"      ⚠️  Vertex {i}: Invalid collision coords {vertex_collision}")
+                        offset += 12
+                        continue
+                    
+                    vertices.append(vertex_collision)
+                    
+                except struct.error as e:
+                    parse_errors += 1
+                    if parse_errors <= 5:
+                        print(f"      💥 Parse error at vertex {i}: {e}")
+                    break
                 
-                # Transform from STAR to collision coordinates
-                vertex_collision = self.transform_star_to_collision(vertex_star)
-                vertices.append(vertex_collision)
                 offset += 12
+            
+            # DEBUG: Print detailed statistics
+            print(f"      📈 Parsing results:")
+            print(f"         Input vertices: {vertex_count}")
+            print(f"         Successfully parsed: {len(vertices)}")
+            print(f"         Skipped (invalid): {skipped_vertices}")
+            print(f"         Parse errors: {parse_errors}")
+            print(f"         Success rate: {len(vertices)/vertex_count*100:.1f}%")
             
             if not vertices:
                 return 0
             
-            print(f"      ✅ Parsed {len(vertices)} STAR mesh vertices")
+            print(f"      ✅ Parsed {len(vertices)} STAR mesh vertices (from {vertex_count} input vertices)")
             
             # Add to accumulator
             if frame_id not in self.vertex_accumulators:
@@ -357,6 +403,8 @@ class DataParser:
             
         except Exception as e:
             print(f"⚠️  Human vertices batch parse error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def get_complete_human_vertices(self, frame_id: int) -> Optional[o3d.geometry.PointCloud]:
@@ -477,8 +525,18 @@ class DataParser:
             print(f"   Parsing human data: {len(human_packets)} packets")
             
             # Classify packets as joints vs vertex batches
-            joint_packets = [p for p in human_packets if len(p) <= 200]
-            vertex_packets = [p for p in human_packets if len(p) > 200]
+            joint_packets = []
+            vertex_packets = []
+            
+            for i, packet in enumerate(human_packets):
+                if len(packet) <= 200:
+                    # Small packet - likely joints
+                    joint_packets.append(packet)
+                    print(f"     Packet {i+1}: {len(packet)} bytes → JOINTS")
+                else:
+                    # Large packet - likely vertex batch
+                    vertex_packets.append(packet)
+                    print(f"     Packet {i+1}: {len(packet)} bytes → VERTICES")
             
             print(f"     Joint packets: {len(joint_packets)}, Vertex packets: {len(vertex_packets)}")
             
