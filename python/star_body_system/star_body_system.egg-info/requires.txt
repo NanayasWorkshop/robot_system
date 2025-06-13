@@ -1,0 +1,5 @@
+numpy
+torch
+plotly
+scipy
+h5py
