@@ -124,7 +124,7 @@ public:
      * Send frame synchronization packet
      * @param total_packets Number of packets sent this frame
      * @param computation_time_ms Computation time for this frame
-     * @return true if sent successfully
+     * @return true if published successfully
      */
     bool send_frame_sync(uint32_t total_packets, double computation_time_ms = 0.0);
     
@@ -200,6 +200,54 @@ private:
      * @return true if all batches sent successfully
      */
     bool send_human_vertices_batched(const std::vector<Eigen::Vector3d>& vertices);
+    
+    // =============================================================================
+    // FRAME ID SPECIFIC METHODS (NEW)
+    // =============================================================================
+    
+    /**
+     * Publish robot capsules with specific frame ID
+     * @param robot_capsules Robot capsule data
+     * @param frame_id Frame ID to use
+     * @return true if published successfully
+     */
+    bool publish_robot_capsules_with_frame_id(const std::vector<CapsuleData>& robot_capsules, uint32_t frame_id);
+    
+    /**
+     * Publish human pose with specific frame ID
+     * @param human_joints Joint positions
+     * @param human_vertices Mesh vertices (optional)
+     * @param frame_id Frame ID to use
+     * @return true if published successfully
+     */
+    bool publish_human_pose_with_frame_id(const std::vector<Eigen::Vector3d>& human_joints,
+                                         const std::vector<Eigen::Vector3d>& human_vertices,
+                                         uint32_t frame_id);
+    
+    /**
+     * Publish collision contacts with specific frame ID
+     * @param collision_result Collision detection results
+     * @param frame_id Frame ID to use
+     * @return true if published successfully
+     */
+    bool publish_collision_contacts_with_frame_id(const CollisionResult& collision_result, uint32_t frame_id);
+    
+    /**
+     * Send frame synchronization packet with specific frame ID
+     * @param total_packets Number of packets sent this frame
+     * @param computation_time_ms Computation time for this frame
+     * @param frame_id Frame ID to use
+     * @return true if published successfully
+     */
+    bool send_frame_sync_with_frame_id(uint32_t total_packets, double computation_time_ms, uint32_t frame_id);
+    
+    /**
+     * Send human vertices in batches with specific frame ID
+     * @param vertices Vertex array
+     * @param frame_id Frame ID to use
+     * @return true if all batches sent successfully
+     */
+    bool send_human_vertices_batched_with_frame_id(const std::vector<Eigen::Vector3d>& vertices, uint32_t frame_id);
     
     // =============================================================================
     // UTILITY METHODS

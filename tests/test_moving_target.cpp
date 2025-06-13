@@ -37,9 +37,9 @@ private:
     
     // Animation parameters
     const double target_fps_ = 30.0;
-    const double orbit_radius_ = 80.0;  // mm
+    const double orbit_radius_ = 20.0;  // mm
     const double orbit_speed_ = 0.5;    // revolutions per second
-    const Eigen::Vector3d orbit_center_{50.0, 30.0, 120.0}; // mm
+    const Eigen::Vector3d orbit_center_{50.0, 30.0, 320.0}; // mm
     
     // Robot configuration
     const int num_segments_ = 7;

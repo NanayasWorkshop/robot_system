@@ -73,41 +73,44 @@ bool DataPublisher::publish_collision_frame(
             return false;
         }
         
+        // FIXED: Increment frame ID once per complete frame
+        uint32_t frame_id = get_next_frame_id();
+        
         uint32_t packets_sent = 0;
         bool success = true;
         
         // 1. Publish robot capsules
         if (success && !robot_capsules.empty()) {
-            success &= publish_robot_capsules(robot_capsules);
+            success &= publish_robot_capsules_with_frame_id(robot_capsules, frame_id);
             if (success) packets_sent++;
         }
         
         // 2. Publish human pose
         if (success && !human_joints.empty()) {
-            success &= publish_human_pose(human_joints, human_vertices);
+            success &= publish_human_pose_with_frame_id(human_joints, human_vertices, frame_id);
             if (success) packets_sent++;
             
             // Send vertices separately if present
             if (success && !human_vertices.empty()) {
-                success &= send_human_vertices_batched(human_vertices);
+                success &= send_human_vertices_batched_with_frame_id(human_vertices, frame_id);
                 // Note: batched sends count as multiple packets
             }
         }
         
         // 3. Publish collision contacts
         if (success) {
-            success &= publish_collision_contacts(collision_result);
+            success &= publish_collision_contacts_with_frame_id(collision_result, frame_id);
             if (success) packets_sent++;
         }
         
         // 4. Send frame synchronization
         if (success) {
-            success &= send_frame_sync(packets_sent, computation_time_ms);
+            success &= send_frame_sync_with_frame_id(packets_sent, computation_time_ms, frame_id);
         }
         
         if (!success) {
             std::cerr << "DataPublisher: Failed to publish complete frame " 
-                      << current_frame_id_ << std::endl;
+                      << frame_id << std::endl;
             return false;
         }
     }
@@ -136,10 +139,14 @@ bool DataPublisher::publish_layer_states(const LayerStates& layer_states) {
 }
 
 // =============================================================================
-// INDIVIDUAL PACKET PUBLISHING
+// INDIVIDUAL PACKET PUBLISHING (Updated with frame ID parameter)
 // =============================================================================
 
 bool DataPublisher::publish_robot_capsules(const std::vector<CapsuleData>& robot_capsules) {
+    return publish_robot_capsules_with_frame_id(robot_capsules, get_next_frame_id());
+}
+
+bool DataPublisher::publish_robot_capsules_with_frame_id(const std::vector<CapsuleData>& robot_capsules, uint32_t frame_id) {
     if (!is_ready()) {
         return false;
     }
@@ -147,9 +154,9 @@ bool DataPublisher::publish_robot_capsules(const std::vector<CapsuleData>& robot
     // Convert to visualization format
     RobotCapsulesPacket capsules_packet = convert_robot_capsules(robot_capsules);
     
-    // Create packet header
+    // Create packet header with provided frame ID
     PacketHeader header = create_packet_header<RobotCapsulesPacket>(
-        PacketType::ROBOT_CAPSULES, current_frame_id_, get_current_timestamp_ms());
+        PacketType::ROBOT_CAPSULES, frame_id, get_current_timestamp_ms());
     
     // Serialize and send
     uint8_t buffer[get_total_packet_size<RobotCapsulesPacket>()];
@@ -160,6 +167,12 @@ bool DataPublisher::publish_robot_capsules(const std::vector<CapsuleData>& robot
 
 bool DataPublisher::publish_human_pose(const std::vector<Eigen::Vector3d>& human_joints,
                                       const std::vector<Eigen::Vector3d>& human_vertices) {
+    return publish_human_pose_with_frame_id(human_joints, human_vertices, get_next_frame_id());
+}
+
+bool DataPublisher::publish_human_pose_with_frame_id(const std::vector<Eigen::Vector3d>& human_joints,
+                                                    const std::vector<Eigen::Vector3d>& human_vertices,
+                                                    uint32_t frame_id) {
     if (!is_ready()) {
         return false;
     }
@@ -168,9 +181,9 @@ bool DataPublisher::publish_human_pose(const std::vector<Eigen::Vector3d>& human
     HumanPosePacket pose_packet = convert_human_pose(human_joints);
     pose_packet.vertex_count = static_cast<uint32_t>(human_vertices.size());
     
-    // Create packet header
+    // Create packet header with provided frame ID
     PacketHeader header = create_packet_header<HumanPosePacket>(
-        PacketType::HUMAN_POSE, current_frame_id_, get_current_timestamp_ms());
+        PacketType::HUMAN_POSE, frame_id, get_current_timestamp_ms());
     
     // Serialize and send
     uint8_t buffer[get_total_packet_size<HumanPosePacket>()];
@@ -180,6 +193,10 @@ bool DataPublisher::publish_human_pose(const std::vector<Eigen::Vector3d>& human
 }
 
 bool DataPublisher::publish_collision_contacts(const CollisionResult& collision_result) {
+    return publish_collision_contacts_with_frame_id(collision_result, get_next_frame_id());
+}
+
+bool DataPublisher::publish_collision_contacts_with_frame_id(const CollisionResult& collision_result, uint32_t frame_id) {
     if (!is_ready()) {
         return false;
     }
@@ -187,9 +204,9 @@ bool DataPublisher::publish_collision_contacts(const CollisionResult& collision_
     // Convert to visualization format
     CollisionContactsPacket contacts_packet = convert_collision_contacts(collision_result);
     
-    // Create packet header
+    // Create packet header with provided frame ID
     PacketHeader header = create_packet_header<CollisionContactsPacket>(
-        PacketType::COLLISION_CONTACTS, current_frame_id_, get_current_timestamp_ms());
+        PacketType::COLLISION_CONTACTS, frame_id, get_current_timestamp_ms());
     
     // Serialize and send
     uint8_t buffer[get_total_packet_size<CollisionContactsPacket>()];
@@ -199,17 +216,21 @@ bool DataPublisher::publish_collision_contacts(const CollisionResult& collision_
 }
 
 bool DataPublisher::send_frame_sync(uint32_t total_packets, double computation_time_ms) {
+    return send_frame_sync_with_frame_id(total_packets, computation_time_ms, current_frame_id_);
+}
+
+bool DataPublisher::send_frame_sync_with_frame_id(uint32_t total_packets, double computation_time_ms, uint32_t frame_id) {
     if (!is_ready()) {
         return false;
     }
     
     // Create frame sync packet
-    FrameSyncPacket sync_packet(current_frame_id_, get_current_timestamp_ms(), 
+    FrameSyncPacket sync_packet(frame_id, get_current_timestamp_ms(), 
                                total_packets, static_cast<float>(computation_time_ms));
     
-    // Create packet header
+    // Create packet header with provided frame ID
     PacketHeader header = create_packet_header<FrameSyncPacket>(
-        PacketType::FRAME_SYNC, current_frame_id_, get_current_timestamp_ms());
+        PacketType::FRAME_SYNC, frame_id, get_current_timestamp_ms());
     
     // Serialize and send
     uint8_t buffer[get_total_packet_size<FrameSyncPacket>()];
@@ -370,6 +391,10 @@ CollisionLayersPacket DataPublisher::convert_layer_states(const LayerStates& lay
 }
 
 bool DataPublisher::send_human_vertices_batched(const std::vector<Eigen::Vector3d>& vertices) {
+    return send_human_vertices_batched_with_frame_id(vertices, current_frame_id_);
+}
+
+bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<Eigen::Vector3d>& vertices, uint32_t frame_id) {
     if (vertices.empty()) {
         return true;
     }
@@ -396,9 +421,9 @@ bool DataPublisher::send_human_vertices_batched(const std::vector<Eigen::Vector3
             );
         }
         
-        // Create packet header (using HUMAN_POSE type with batch info)
+        // Create packet header with provided frame ID (using HUMAN_POSE type with batch info)
         PacketHeader header = create_packet_header<HumanVerticesPacket>(
-            PacketType::HUMAN_POSE, current_frame_id_, get_current_timestamp_ms());
+            PacketType::HUMAN_POSE, frame_id, get_current_timestamp_ms());
         
         // Serialize and send
         uint8_t buffer[get_total_packet_size<HumanVerticesPacket>()];
