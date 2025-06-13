@@ -1,5 +1,3 @@
-#pragma once
-
 #include <Eigen/Dense>
 #include <vector>
 #include <string>

@@ -124,6 +124,9 @@ public:
         int contacts_found;
         double avg_penetration_depth;
         double max_penetration_depth;
+        
+        CollisionStats() : total_vertex_tests(0), total_triangle_tests(0), contacts_found(0),
+                          avg_penetration_depth(0.0), max_penetration_depth(0.0) {}
     };
     
     CollisionStats get_collision_statistics() const;
@@ -165,7 +168,7 @@ private:
                                                  const Eigen::Vector3d& line_end) const;
     
     /**
-     * Test capsule against triangle for collision
+     * Test capsule against triangle for collision (NEW OPTIMIZED VERSION)
      * @param capsule_start Capsule start point
      * @param capsule_end Capsule end point
      * @param capsule_radius Capsule radius
@@ -184,6 +187,37 @@ private:
                                    Eigen::Vector3d& contact_point,
                                    Eigen::Vector3d& surface_normal,
                                    double& penetration_depth) const;
+    
+    /**
+     * Find closest points between capsule line segment and triangle
+     * Core algorithm for accurate capsule-triangle distance calculation
+     * @param capsule_start Capsule start point
+     * @param capsule_end Capsule end point
+     * @param v0, v1, v2 Triangle vertices
+     * @param closest_on_capsule Output: closest point on capsule line
+     * @param closest_on_triangle Output: closest point on triangle
+     * @return Minimum distance between capsule line and triangle
+     */
+    double closest_points_capsule_triangle(const Eigen::Vector3d& capsule_start,
+                                          const Eigen::Vector3d& capsule_end,
+                                          const Eigen::Vector3d& v0,
+                                          const Eigen::Vector3d& v1,
+                                          const Eigen::Vector3d& v2,
+                                          Eigen::Vector3d& closest_on_capsule,
+                                          Eigen::Vector3d& closest_on_triangle) const;
+    
+    /**
+     * Find closest points between two line segments
+     * Robust algorithm for 3D line-line distance calculation
+     * @param p1, q1 First line segment endpoints
+     * @param p2, q2 Second line segment endpoints
+     * @param c1 Output: closest point on first segment
+     * @param c2 Output: closest point on second segment
+     * @return Minimum distance between line segments
+     */
+    double closest_points_line_segments(const Eigen::Vector3d& p1, const Eigen::Vector3d& q1,
+                                       const Eigen::Vector3d& p2, const Eigen::Vector3d& q2,
+                                       Eigen::Vector3d& c1, Eigen::Vector3d& c2) const;
     
     /**
      * Calculate triangle normal

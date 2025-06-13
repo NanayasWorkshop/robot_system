@@ -332,46 +332,164 @@ bool MeshCollisionDetector::capsule_triangle_collision(const Eigen::Vector3d& ca
         return false;
     }
     
-    // Find closest point on triangle to capsule axis
-    Eigen::Vector3d closest_on_capsule = closest_point_on_line_segment(v0, capsule_start, capsule_end);
-    Eigen::Vector3d closest_on_triangle = closest_point_on_triangle(closest_on_capsule, v0, v1, v2);
+    // Find the closest points between capsule line segment and triangle
+    Eigen::Vector3d closest_on_capsule;
+    Eigen::Vector3d closest_on_triangle;
     
-    // Test capsule start point against triangle
-    Eigen::Vector3d start_closest = closest_point_on_triangle(capsule_start, v0, v1, v2);
-    double start_distance = (capsule_start - start_closest).norm();
-    
-    // Test capsule end point against triangle  
-    Eigen::Vector3d end_closest = closest_point_on_triangle(capsule_end, v0, v1, v2);
-    double end_distance = (capsule_end - end_closest).norm();
-    
-    // Find minimum distance
-    double min_distance = std::min(start_distance, end_distance);
-    contact_point = (start_distance < end_distance) ? start_closest : end_closest;
-    
-    // Also test middle of capsule for better accuracy
-    Eigen::Vector3d capsule_mid = (capsule_start + capsule_end) * 0.5;
-    Eigen::Vector3d mid_closest = closest_point_on_triangle(capsule_mid, v0, v1, v2);
-    double mid_distance = (capsule_mid - mid_closest).norm();
-    
-    if (mid_distance < min_distance) {
-        min_distance = mid_distance;
-        contact_point = mid_closest;
-    }
+    // Find minimum distance between capsule line and triangle
+    double min_distance = closest_points_capsule_triangle(
+        capsule_start, capsule_end, v0, v1, v2,
+        closest_on_capsule, closest_on_triangle);
     
     // Check if collision occurs
     if (min_distance <= capsule_radius) {
         penetration_depth = capsule_radius - min_distance;
+        contact_point = closest_on_triangle;
         
-        // Ensure normal points away from capsule
-        Eigen::Vector3d capsule_to_contact = contact_point - closest_on_capsule;
-        if (surface_normal.dot(capsule_to_contact) < 0) {
-            surface_normal = -surface_normal;
+        // Calculate proper surface normal (from triangle to capsule)
+        if (min_distance > 1e-12) {
+            surface_normal = (closest_on_capsule - closest_on_triangle).normalized();
+        } else {
+            // Points are coincident - use triangle normal
+            surface_normal = calculate_triangle_normal(v0, v1, v2);
         }
         
         return true;
     }
     
     return false;
+}
+
+double MeshCollisionDetector::closest_points_capsule_triangle(
+    const Eigen::Vector3d& capsule_start,
+    const Eigen::Vector3d& capsule_end,
+    const Eigen::Vector3d& v0,
+    const Eigen::Vector3d& v1,
+    const Eigen::Vector3d& v2,
+    Eigen::Vector3d& closest_on_capsule,
+    Eigen::Vector3d& closest_on_triangle) const {
+    
+    double min_distance = std::numeric_limits<double>::max();
+    
+    // Strategy: Test capsule line segment against triangle edges and vertices
+    
+    // Test capsule line vs triangle edges
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> edges = {
+        {v0, v1}, {v1, v2}, {v2, v0}
+    };
+    
+    for (const auto& edge : edges) {
+        Eigen::Vector3d capsule_pt, edge_pt;
+        double distance = closest_points_line_segments(
+            capsule_start, capsule_end, edge.first, edge.second,
+            capsule_pt, edge_pt);
+        
+        if (distance < min_distance) {
+            min_distance = distance;
+            closest_on_capsule = capsule_pt;
+            closest_on_triangle = edge_pt;
+        }
+    }
+    
+    // Test capsule endpoints vs triangle
+    std::vector<Eigen::Vector3d> capsule_points = {capsule_start, capsule_end};
+    
+    for (const auto& cap_point : capsule_points) {
+        Eigen::Vector3d tri_point = closest_point_on_triangle(cap_point, v0, v1, v2);
+        double distance = (cap_point - tri_point).norm();
+        
+        if (distance < min_distance) {
+            min_distance = distance;
+            closest_on_capsule = cap_point;
+            closest_on_triangle = tri_point;
+        }
+    }
+    
+    // Test triangle vertices vs capsule line
+    std::vector<Eigen::Vector3d> triangle_points = {v0, v1, v2};
+    
+    for (const auto& tri_point : triangle_points) {
+        Eigen::Vector3d cap_point = closest_point_on_line_segment(tri_point, capsule_start, capsule_end);
+        double distance = (tri_point - cap_point).norm();
+        
+        if (distance < min_distance) {
+            min_distance = distance;
+            closest_on_capsule = cap_point;
+            closest_on_triangle = tri_point;
+        }
+    }
+    
+    return min_distance;
+}
+
+double MeshCollisionDetector::closest_points_line_segments(
+    const Eigen::Vector3d& p1, const Eigen::Vector3d& q1,
+    const Eigen::Vector3d& p2, const Eigen::Vector3d& q2,
+    Eigen::Vector3d& c1, Eigen::Vector3d& c2) const {
+    
+    Eigen::Vector3d d1 = q1 - p1; // Direction vector of segment 1
+    Eigen::Vector3d d2 = q2 - p2; // Direction vector of segment 2
+    Eigen::Vector3d r = p1 - p2;
+    
+    double a = d1.dot(d1); // Squared length of segment 1
+    double e = d2.dot(d2); // Squared length of segment 2
+    double f = d2.dot(r);
+    
+    // Handle degenerate cases
+    if (a <= 1e-12 && e <= 1e-12) {
+        // Both segments degenerate to points
+        c1 = p1;
+        c2 = p2;
+        return (c1 - c2).norm();
+    }
+    
+    if (a <= 1e-12) {
+        // First segment degenerates to a point
+        double t2 = clamp(f / e, 0.0, 1.0);
+        c1 = p1;
+        c2 = p2 + t2 * d2;
+        return (c1 - c2).norm();
+    }
+    
+    double c = d1.dot(r);
+    if (e <= 1e-12) {
+        // Second segment degenerates to a point
+        double t1 = clamp(-c / a, 0.0, 1.0);
+        c1 = p1 + t1 * d1;
+        c2 = p2;
+        return (c1 - c2).norm();
+    }
+    
+    // General case
+    double b = d1.dot(d2);
+    double denom = a * e - b * b; // Always nonnegative
+    
+    double s, t;
+    
+    if (denom != 0.0) {
+        // Lines are not parallel
+        s = clamp((b * f - c * e) / denom, 0.0, 1.0);
+    } else {
+        // Lines are parallel, pick any point on first segment
+        s = 0.0;
+    }
+    
+    // Compute point on second segment closest to point at s
+    t = (b * s + f) / e;
+    
+    // If t is outside [0,1], clamp and recompute s
+    if (t < 0.0) {
+        t = 0.0;
+        s = clamp(-c / a, 0.0, 1.0);
+    } else if (t > 1.0) {
+        t = 1.0;
+        s = clamp((b - c) / a, 0.0, 1.0);
+    }
+    
+    c1 = p1 + s * d1;
+    c2 = p2 + t * d2;
+    
+    return (c1 - c2).norm();
 }
 
 Eigen::Vector3d MeshCollisionDetector::calculate_triangle_normal(const Eigen::Vector3d& v0,
