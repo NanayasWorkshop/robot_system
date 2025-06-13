@@ -4,6 +4,8 @@
 #include <Eigen/Dense>
 #include <string>
 #include <memory>
+#include <unordered_map>
+#include <algorithm>
 
 namespace delta {
 
@@ -411,28 +413,6 @@ struct HierarchyMappings {
     
     HierarchyMappings() : num_vertices(0), num_spheres(0), num_capsules(0), 
                          num_simple(0), max_assignments_per_vertex(0) {}
-};
-
-// =============================================================================
-// TIMING AND PERFORMANCE
-// =============================================================================
-
-class ScopedTimer {
-private:
-    double& time_accumulator_;
-    std::chrono::high_resolution_clock::time_point start_time_;
-    
-public:
-    explicit ScopedTimer(double& accumulator) 
-        : time_accumulator_(accumulator), 
-          start_time_(std::chrono::high_resolution_clock::now()) {}
-    
-    ~ScopedTimer() {
-        auto end_time = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
-            end_time - start_time_);
-        time_accumulator_ += duration.count() / 1000.0; // Convert to milliseconds
-    }
 };
 
 // =============================================================================

@@ -157,7 +157,16 @@ public:
         int active_layer1;
         int loaded_layer0;
         double memory_usage_mb;
+        
+        LayerStats() : total_layer3(0), active_layer2(0), active_layer1(0), 
+                      loaded_layer0(0), memory_usage_mb(0.0) {}
     };
+    
+    /**
+     * Get layer statistics
+     * @return Current layer statistics
+     */
+    LayerStats get_layer_statistics() const;
     
     /**
      * Get collision branch statistics - shows selective loading efficiency
@@ -177,8 +186,18 @@ public:
         
         double selectivity_ratio;     // Percentage of total system that's active
         double memory_efficiency;    // Memory saved by selective loading
+        
+        CollisionBranchStats() : total_layer3_primitives(0), hit_layer3_primitives(0),
+                                total_layer2_primitives(0), active_layer2_primitives(0),
+                                total_layer1_primitives(0), active_layer1_primitives(0),
+                                total_vertices(0), loaded_vertices(0),
+                                selectivity_ratio(0.0), memory_efficiency(0.0) {}
     };
     
+    /**
+     * Get collision branch statistics
+     * @return Current branch statistics
+     */
     CollisionBranchStats get_collision_branch_statistics() const;
     
     /**
@@ -191,11 +210,6 @@ private:
     // =============================================================================
     // INTERNAL METHODS
     // =============================================================================
-    
-    /**
-     * Load hierarchy mappings from HDF5 file
-     */
-    bool load_hierarchy_mappings_from_hdf5();
     
     /**
      * Build reverse lookup mappings for faster access

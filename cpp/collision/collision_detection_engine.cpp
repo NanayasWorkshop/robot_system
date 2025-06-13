@@ -1,9 +1,14 @@
 #include "collision_detection_engine.hpp"
-#include "capsule_creation_block.hpp" // For CapsuleData
+#include "../collision_blocks/capsule_creation_block.hpp" // For CapsuleData
+#include "../core/timing.hpp" // For ScopedTimer
 #include <iostream>
 #include <algorithm>
 #include <execution>
 #include <numeric>
+#include <chrono>
+#include <unordered_set>
+#include <iomanip>
+#include <thread>
 
 namespace delta {
 
@@ -458,7 +463,7 @@ void CollisionDetectionEngine::execute_stage4_selective_layer0_collision(
 }
 
 // =============================================================================
-// PARALLEL PROCESSING HELPERS (unchanged)
+// PARALLEL PROCESSING HELPERS
 // =============================================================================
 
 bool CollisionDetectionEngine::test_capsule_vs_layer3(const CapsuleData& capsule,
@@ -620,9 +625,6 @@ std::string CollisionDetectionEngine::get_debug_info() const {
     debug_info += "\nClean Selective Loading Efficiency:\n";
     debug_info += "  Overall selectivity: " + std::to_string(branch_stats.selectivity_ratio) + "% of system active\n";
     debug_info += "  Memory efficiency: " + std::to_string(branch_stats.memory_efficiency) + "% memory saved\n";
-    debug_info += "  Active branches L2: " + std::to_string(branch_stats.total_active_branches_layer2) + "\n";
-    debug_info += "  Active branches L1: " + std::to_string(branch_stats.total_active_branches_layer1) + "\n";
-    debug_info += "  Active branches L0: " + std::to_string(branch_stats.total_active_branches_layer0) + "\n";
     debug_info += "  Active Layer 2: " + std::to_string(branch_stats.active_layer2_primitives) + "/23\n";
     debug_info += "  Active Layer 1: " + std::to_string(branch_stats.active_layer1_primitives) + "/76\n";
     debug_info += "  Loaded vertices: " + std::to_string(branch_stats.loaded_vertices) + "/6890\n";

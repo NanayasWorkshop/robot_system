@@ -1,8 +1,10 @@
 #include "layer_manager.hpp"
-#include <h5cpp/hdf5.hpp>
+#include <hdf5.h>  // Standard HDF5 instead of h5cpp
 #include <iostream>
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
+#include "../core/timing.hpp"
 
 namespace delta {
 
@@ -24,15 +26,31 @@ bool LayerManager::load_hdf5_data(const std::string& filepath) {
     try {
         hdf5_filepath_ = filepath;
         
-        // Open HDF5 file
-        auto file = hdf5::file::open(filepath, hdf5::file::AccessFlags::READONLY);
+        // Open HDF5 file using standard HDF5 C API
+        hid_t file_id = H5Fopen(filepath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file_id < 0) {
+            std::cerr << "❌ Failed to open HDF5 file: " << filepath << std::endl;
+            return false;
+        }
         
-        // Load basic metadata
-        hierarchy_mappings_.num_vertices = file.attributes["num_vertices"].read<int>();
-        hierarchy_mappings_.num_spheres = file.attributes["num_spheres"].read<int>();
-        hierarchy_mappings_.num_capsules = file.attributes["num_capsules"].read<int>();
-        hierarchy_mappings_.num_simple = file.attributes["num_simple"].read<int>();
-        hierarchy_mappings_.max_assignments_per_vertex = file.attributes["max_assignments_per_vertex"].read<int>();
+        // Load basic metadata from attributes
+        auto read_int_attr = [file_id](const char* name, int& value) -> bool {
+            hid_t attr_id = H5Aopen(file_id, name, H5P_DEFAULT);
+            if (attr_id < 0) return false;
+            herr_t status = H5Aread(attr_id, H5T_NATIVE_INT, &value);
+            H5Aclose(attr_id);
+            return status >= 0;
+        };
+        
+        if (!read_int_attr("num_vertices", hierarchy_mappings_.num_vertices) ||
+            !read_int_attr("num_spheres", hierarchy_mappings_.num_spheres) ||
+            !read_int_attr("num_capsules", hierarchy_mappings_.num_capsules) ||
+            !read_int_attr("num_simple", hierarchy_mappings_.num_simple) ||
+            !read_int_attr("max_assignments_per_vertex", hierarchy_mappings_.max_assignments_per_vertex)) {
+            std::cerr << "❌ Failed to read required attributes from HDF5 file" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
         
         std::cout << "Loading HDF5 collision data:" << std::endl;
         std::cout << "  Vertices: " << hierarchy_mappings_.num_vertices << std::endl;
@@ -40,13 +58,51 @@ bool LayerManager::load_hdf5_data(const std::string& filepath) {
         std::cout << "  Capsules: " << hierarchy_mappings_.num_capsules << std::endl;
         std::cout << "  Simple capsules: " << hierarchy_mappings_.num_simple << std::endl;
         
-        // Load vertex sphere assignments (2D array)
-        auto vertex_assignments_dataset = file.root()["vertex_sphere_assignments"];
-        auto vertex_assignments_data = vertex_assignments_dataset.read<std::vector<std::vector<int>>>();
+        // Load vertex sphere assignments
+        hid_t vertex_assignments_dataset = H5Dopen2(file_id, "/vertex_sphere_assignments", H5P_DEFAULT);
+        if (vertex_assignments_dataset < 0) {
+            std::cerr << "❌ Failed to open vertex_sphere_assignments dataset" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
+        
+        // Get dataset dimensions
+        hid_t space_id = H5Dget_space(vertex_assignments_dataset);
+        hsize_t dims[2];
+        H5Sget_simple_extent_dims(space_id, dims, NULL);
+        
+        // Read vertex assignments as 2D array
+        std::vector<int> vertex_assignments_flat(dims[0] * dims[1]);
+        herr_t status = H5Dread(vertex_assignments_dataset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, 
+                               H5P_DEFAULT, vertex_assignments_flat.data());
+        
+        H5Sclose(space_id);
+        H5Dclose(vertex_assignments_dataset);
+        
+        if (status < 0) {
+            std::cerr << "❌ Failed to read vertex assignments" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
         
         // Load assignment lengths
-        auto assignment_lengths_dataset = file.root()["assignment_lengths"];
-        auto assignment_lengths = assignment_lengths_dataset.read<std::vector<int>>();
+        hid_t lengths_dataset = H5Dopen2(file_id, "/assignment_lengths", H5P_DEFAULT);
+        if (lengths_dataset < 0) {
+            std::cerr << "❌ Failed to open assignment_lengths dataset" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
+        
+        std::vector<int> assignment_lengths(hierarchy_mappings_.num_vertices);
+        status = H5Dread(lengths_dataset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, 
+                        H5P_DEFAULT, assignment_lengths.data());
+        H5Dclose(lengths_dataset);
+        
+        if (status < 0) {
+            std::cerr << "❌ Failed to read assignment lengths" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
         
         // Process vertex assignments (remove padding -1 values)
         hierarchy_mappings_.vertex_sphere_assignments.resize(hierarchy_mappings_.num_vertices);
@@ -54,8 +110,8 @@ bool LayerManager::load_hdf5_data(const std::string& filepath) {
             int num_assignments = assignment_lengths[vertex_idx];
             hierarchy_mappings_.vertex_sphere_assignments[vertex_idx].clear();
             
-            for (int i = 0; i < num_assignments; ++i) {
-                int sphere_idx = vertex_assignments_data[vertex_idx][i];
+            for (int i = 0; i < num_assignments && i < static_cast<int>(dims[1]); ++i) {
+                int sphere_idx = vertex_assignments_flat[vertex_idx * dims[1] + i];
                 if (sphere_idx >= 0) {  // Skip padding -1 values
                     hierarchy_mappings_.vertex_sphere_assignments[vertex_idx].push_back(sphere_idx);
                 }
@@ -63,12 +119,45 @@ bool LayerManager::load_hdf5_data(const std::string& filepath) {
         }
         
         // Load sphere to capsule mappings
-        auto sphere_to_capsule_dataset = file.root()["sphere_to_capsule"];
-        hierarchy_mappings_.sphere_to_capsule = sphere_to_capsule_dataset.read<std::vector<int>>();
+        hid_t sphere_capsule_dataset = H5Dopen2(file_id, "/sphere_to_capsule", H5P_DEFAULT);
+        if (sphere_capsule_dataset < 0) {
+            std::cerr << "❌ Failed to open sphere_to_capsule dataset" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
+        
+        hierarchy_mappings_.sphere_to_capsule.resize(hierarchy_mappings_.num_spheres);
+        status = H5Dread(sphere_capsule_dataset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, 
+                        H5P_DEFAULT, hierarchy_mappings_.sphere_to_capsule.data());
+        H5Dclose(sphere_capsule_dataset);
+        
+        if (status < 0) {
+            std::cerr << "❌ Failed to read sphere_to_capsule mapping" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
         
         // Load capsule to simple mappings
-        auto capsule_to_simple_dataset = file.root()["capsule_to_simple"];
-        hierarchy_mappings_.capsule_to_simple = capsule_to_simple_dataset.read<std::vector<int>>();
+        hid_t capsule_simple_dataset = H5Dopen2(file_id, "/capsule_to_simple", H5P_DEFAULT);
+        if (capsule_simple_dataset < 0) {
+            std::cerr << "❌ Failed to open capsule_to_simple dataset" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
+        
+        hierarchy_mappings_.capsule_to_simple.resize(hierarchy_mappings_.num_capsules);
+        status = H5Dread(capsule_simple_dataset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, 
+                        H5P_DEFAULT, hierarchy_mappings_.capsule_to_simple.data());
+        H5Dclose(capsule_simple_dataset);
+        
+        if (status < 0) {
+            std::cerr << "❌ Failed to read capsule_to_simple mapping" << std::endl;
+            H5Fclose(file_id);
+            return false;
+        }
+        
+        // Close HDF5 file
+        H5Fclose(file_id);
         
         // Build reverse mappings for faster lookup
         build_reverse_mappings();
@@ -314,20 +403,20 @@ LayerManager::CollisionBranchStats LayerManager::get_collision_branch_statistics
     
     // Layer 2 (selective activation)
     stats.total_layer2_primitives = static_cast<int>(layer_states_.layer2_primitives.size());
-    stats.active_layer2_primitives = static_cast<int>(std::count(layer_states_.active_layer2.begin(), 
-                                                                 layer_states_.active_layer2.end(), true));
+    auto active_layer2_indices = layer_states_.get_all_active_layer2_indices();
+    stats.active_layer2_primitives = static_cast<int>(active_layer2_indices.size());
     
     // Layer 1 (selective activation)
     stats.total_layer1_primitives = static_cast<int>(layer_states_.layer1_primitives.size());
-    stats.active_layer1_primitives = static_cast<int>(std::count(layer_states_.active_layer1.begin(), 
-                                                                 layer_states_.active_layer1.end(), true));
+    auto active_layer1_indices = layer_states_.get_all_active_layer1_indices();
+    stats.active_layer1_primitives = static_cast<int>(active_layer1_indices.size());
     
     // Layer 0 (selective vertex loading)
     stats.total_vertices = hierarchy_mappings_.num_vertices;
     stats.loaded_vertices = 0;
     
     for (size_t i = 0; i < layer_states_.layer0_vertex_groups.size(); ++i) {
-        if (layer_states_.active_layer0[i] && layer_states_.layer0_vertex_groups[i].is_loaded) {
+        if (layer_states_.layer0_vertex_groups[i].is_loaded) {
             stats.loaded_vertices += static_cast<int>(layer_states_.layer0_vertex_groups[i].vertices.size());
         }
     }
@@ -480,7 +569,6 @@ void LayerManager::initialize_layer_primitives() {
     // Initialize Layer 2 primitives (23 detailed capsules)
     layer_states_.layer2_primitives.clear();
     layer_states_.layer2_primitives.reserve(hierarchy_mappings_.num_capsules);
-    layer_states_.active_layer2.resize(hierarchy_mappings_.num_capsules, false);
     
     for (int i = 0; i < hierarchy_mappings_.num_capsules; ++i) {
         Layer2Primitive primitive;
@@ -496,7 +584,6 @@ void LayerManager::initialize_layer_primitives() {
     // Initialize Layer 1 primitives (76 spheres)
     layer_states_.layer1_primitives.clear();
     layer_states_.layer1_primitives.reserve(hierarchy_mappings_.num_spheres);
-    layer_states_.active_layer1.resize(hierarchy_mappings_.num_spheres, false);
     
     for (int i = 0; i < hierarchy_mappings_.num_spheres; ++i) {
         Layer1Primitive primitive;
@@ -512,7 +599,6 @@ void LayerManager::initialize_layer_primitives() {
     // Initialize Layer 0 vertex groups (one per sphere)
     layer_states_.layer0_vertex_groups.clear();
     layer_states_.layer0_vertex_groups.reserve(hierarchy_mappings_.num_spheres);
-    layer_states_.active_layer0.resize(hierarchy_mappings_.num_spheres, false);
     
     for (int i = 0; i < hierarchy_mappings_.num_spheres; ++i) {
         Layer0Vertices vertex_group;
@@ -638,7 +724,6 @@ void LayerManager::cool_down_layer2(int current_frame) {
         if (primitive.is_active && 
             (current_frame - primitive.last_collision_frame) > cooldown_frames_) {
             primitive.is_active = false;
-            // Note: No need to update global active flags as they don't exist anymore
         }
     }
 }
@@ -650,7 +735,6 @@ void LayerManager::cool_down_layer1(int current_frame) {
         if (primitive.is_active && 
             (current_frame - primitive.last_collision_frame) > cooldown_frames_) {
             primitive.is_active = false;
-            // Note: No need to update global active flags as they don't exist anymore
         }
     }
 }
@@ -663,7 +747,6 @@ void LayerManager::cool_down_layer0(int current_frame) {
             (current_frame - vertex_group.last_access_frame) > cooldown_frames_) {
             vertex_group.is_loaded = false;
             vertex_group.vertices.clear(); // Free memory
-            // Note: No need to update global active flags as they don't exist anymore
         }
     }
 }

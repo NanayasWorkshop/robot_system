@@ -1,8 +1,10 @@
 #include "mesh_collision.hpp"
-#include "capsule_creation_block.hpp" // For CapsuleData
+#include "../collision_blocks/capsule_creation_block.hpp" // For CapsuleData
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
+#include <unordered_set>
 
 namespace delta {
 

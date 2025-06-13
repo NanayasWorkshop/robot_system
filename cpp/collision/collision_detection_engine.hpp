@@ -39,6 +39,11 @@ private:
     mutable int total_frame_count_;
     mutable int collision_frame_count_;
     
+    // Pipeline stage control
+    bool enable_stage2_;
+    bool enable_stage3_;
+    bool enable_stage4_;
+    
 public:
     CollisionDetectionEngine();
     ~CollisionDetectionEngine();
@@ -159,11 +164,6 @@ public:
                               const std::vector<int>& layer1_indices = {});
 
 private:
-    // Pipeline stage control
-    bool enable_stage2_;
-    bool enable_stage3_;
-    bool enable_stage4_;
-    
     // =============================================================================
     // PIPELINE STAGES IMPLEMENTATION
     // =============================================================================
@@ -187,7 +187,7 @@ private:
      * @param result Collision result to populate
      * @return Indices of Layer 2 primitives with collisions
      */
-    std::vector<int> execute_stage2_layer2_collision(
+    std::vector<int> execute_stage2_selective_layer2_collision(
         const std::vector<CapsuleData>& robot_capsules,
         const std::vector<int>& layer3_hits,
         CollisionResult& result);
@@ -200,7 +200,7 @@ private:
      * @param result Collision result to populate
      * @return Indices of Layer 1 primitives with collisions
      */
-    std::vector<int> execute_stage3_layer1_collision(
+    std::vector<int> execute_stage3_selective_layer1_collision(
         const std::vector<CapsuleData>& robot_capsules,
         const std::vector<int>& layer2_hits,
         CollisionResult& result);
@@ -212,7 +212,7 @@ private:
      * @param layer1_hits Layer 1 primitives that had collisions
      * @param result Collision result to populate (adds precise contacts)
      */
-    void execute_stage4_layer0_collision(
+    void execute_stage4_selective_layer0_collision(
         const std::vector<CapsuleData>& robot_capsules,
         const std::vector<int>& layer1_hits,
         CollisionResult& result);
@@ -302,21 +302,6 @@ private:
      * @return Recommended thread count
      */
     int get_optimal_thread_count() const;
-    
-    /**
-     * Thread worker function for parallel collision testing
-     * @param robot_capsules Robot capsules to test
-     * @param primitives_start Start index of primitives to test
-     * @param primitives_end End index of primitives to test
-     * @param test_function Function to call for each test
-     * @param results Output array for results
-     */
-    template<typename PrimitiveType, typename TestFunction>
-    void collision_worker_thread(const std::vector<CapsuleData>& robot_capsules,
-                                 const std::vector<PrimitiveType>& primitives,
-                                 int start_idx, int end_idx,
-                                 TestFunction test_function,
-                                 std::vector<bool>& results);
 };
 
 // =============================================================================
