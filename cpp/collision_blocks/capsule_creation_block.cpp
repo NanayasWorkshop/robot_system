@@ -24,7 +24,7 @@ CapsuleChainResult CapsuleCreationBlock::create_capsule_chain(
                     "Invalid robot radius: must be positive");
             }
             
-            // Step 2: Create capsules between consecutive S-points
+            // Step 2: Create capsules between consecutive S-points (NO S0 injection)
             std::vector<CapsuleData> capsules;
             capsules.reserve(s_points.size() - 1);
             double total_length = 0.0;
@@ -65,7 +65,7 @@ CapsuleChainResult CapsuleCreationBlock::update_capsule_positions(
                     "Invalid update: S-points count must match existing capsules");
             }
             
-            // Step 2: Update capsule positions, preserve radius
+            // Step 2: Update capsule positions, preserve radius (NO S0 injection)
             std::vector<CapsuleData> updated_capsules;
             updated_capsules.reserve(existing_capsules.size());
             double total_length = 0.0;

@@ -15,3 +15,5 @@ python/delta_robot.egg-info/dependency_links.txt
 python/delta_robot.egg-info/not-zip-safe
 python/delta_robot.egg-info/requires.txt
 python/delta_robot.egg-info/top_level.txt
+python/star_body_system/__init__.py
+python/star_body_system/setup.py

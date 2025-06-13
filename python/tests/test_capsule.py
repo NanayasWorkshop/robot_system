@@ -61,6 +61,28 @@ def test_capsule_pipeline():
     
     print(f"✓ Extracted {len(s_points)} S-points")
     
+    # DEBUG: Print all S-points
+    print("\nDEBUG - S-points:")
+    for i, sp in enumerate(s_points):
+        print(f"  S{i+1}: ({sp[0]:.3f}, {sp[1]:.3f}, {sp[2]:.3f})")
+    
+    # DEBUG: Check distances between consecutive S-points
+    print("\nDEBUG - Distances between consecutive S-points:")
+    for i in range(len(s_points) - 1):
+        dist = np.linalg.norm(np.array(s_points[i+1]) - np.array(s_points[i]))
+        print(f"  S{i+1} → S{i+2}: {dist:.6f}mm")
+        if dist < 1e-6:
+            print(f"    ⚠️  DEGENERATE SEGMENT!")
+    
+    # DEBUG: What C++ sees after S0 injection
+    print(f"\nDEBUG - After S0 injection at (0,0,0):")
+    complete_s_points = [[0.0, 0.0, 0.0]] + s_points
+    for i in range(len(complete_s_points) - 1):
+        dist = np.linalg.norm(np.array(complete_s_points[i+1]) - np.array(complete_s_points[i]))
+        print(f"  S{i} → S{i+1}: {dist:.6f}mm")
+        if dist < 1e-6:
+            print(f"    ⚠️  DEGENERATE SEGMENT!")
+    
     # Step 3: Create capsules
     robot_radius = delta_robot_cpp.ROBOT_RADIUS
     capsules, total_length, calc_time, success, error_msg = create_capsule_chain(
@@ -81,9 +103,6 @@ def test_capsule_pipeline():
     
     print("=" * 50)
     print("PIPELINE COMPLETED SUCCESSFULLY")
-
-
-
 
 
 def main():
