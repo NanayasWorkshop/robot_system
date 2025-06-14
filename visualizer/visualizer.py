@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
 Open3D Collision Visualizer
-Real-time visualization of robot collision detection system
-ULTRA-OPTIMIZED: Minimal logging for production use
+Clean rewrite: STAR-native (Y-up, meters), minimal logging, pure C++ data display
 """
 
 import argparse
 import time
 import sys
-from typing import Dict, Optional
+from typing import Dict
 import numpy as np
 import open3d as o3d
 from dataclasses import dataclass
@@ -23,20 +22,14 @@ class VisualizerConfig:
     show_robot: bool = True
     show_human: bool = True
     show_collision: bool = True
-    show_layers: list = None
     window_width: int = 1200
     window_height: int = 800
     target_fps: int = 60
     point_size: float = 2.0
-    collision_point_size: float = 4.0
-    
-    def __post_init__(self):
-        if self.show_layers is None:
-            self.show_layers = []
 
 
 class CollisionVisualizer:
-    """Main visualizer application"""
+    """Real-time collision visualization - STAR coordinate native"""
     
     def __init__(self, config: VisualizerConfig):
         self.config = config
@@ -45,324 +38,214 @@ class CollisionVisualizer:
         self.receiver = NetworkReceiver()
         self.parser = DataParser()
         
-        # Open3D components
+        # Open3D
         self.vis = None
-        self.viewport = None
-        
-        # Scene objects
         self.geometries = {}
         self.geometry_names = ['robot', 'human', 'collision']
         
-        # Frame tracking for batched data
-        self.processed_frames = set()
-        self.last_complete_frame = -1
-        
-        # Statistics
-        self.frame_count = 0
-        self.vertex_batch_count = 0
-        self.complete_mesh_count = 0
-        self.last_stats_time = time.time()
-        self.fps_history = []
-        
-        # Runtime state
+        # State
         self.is_running = False
         self.last_frame_id = -1
+        self.processed_frames = set()
+        
+        # Stats
+        self.frame_count = 0
+        self.mesh_count = 0
+        self.last_stats_time = time.time()
     
     def initialize(self) -> bool:
-        """Initialize visualizer components"""
-        print("🚀 Initializing Collision Visualizer...")
+        """Initialize all components"""
+        print("🚀 Initializing Collision Visualizer (STAR-native)")
         
-        # Initialize network receiver
+        # Network
         if not self.receiver.initialize():
-            print("❌ Failed to initialize network receiver")
+            print("❌ Network initialization failed")
             return False
         
-        # Initialize Open3D visualizer
-        if not self._initialize_open3d():
-            print("❌ Failed to initialize Open3D")
+        # Open3D
+        if not self._init_open3d():
+            print("❌ Open3D initialization failed")
             return False
         
-        # Create initial empty geometries
-        self._create_initial_geometries()
+        # Geometries
+        self._create_geometries()
         
-        print("✅ Collision Visualizer ready!")
-        print(f"   Window: {self.config.window_width}x{self.config.window_height}")
-        print(f"   Rendering: {', '.join(self._get_active_renderers())}")
-        print(f"   Listening: UDP port 9999")
-        
+        print("✅ Ready - STAR coordinates (Y-up, meters)")
+        print(f"   Showing: {self._get_enabled_features()}")
         return True
     
-    def _initialize_open3d(self) -> bool:
-        """Initialize Open3D visualizer window"""
+    def _init_open3d(self) -> bool:
+        """Initialize Open3D with STAR coordinate system"""
         try:
-            # Create visualizer
             self.vis = o3d.visualization.Visualizer()
             self.vis.create_window(
-                window_name="Robot Collision Visualization (ULTRA-OPTIMIZED)",
+                window_name="Robot Collision Visualization - STAR Native (Y-up)",
                 width=self.config.window_width,
-                height=self.config.window_height,
-                left=100,
-                top=100
+                height=self.config.window_height
             )
             
-            # Configure rendering options
+            # Rendering
             render_opt = self.vis.get_render_option()
             render_opt.point_size = self.config.point_size
-            render_opt.background_color = np.array([0.1, 0.1, 0.1])  # Dark gray
+            render_opt.background_color = np.array([0.1, 0.1, 0.1])
             render_opt.show_coordinate_frame = True
             
-            # Set up camera (Z-up coordinate system)
+            # STAR camera setup (Y-up, meters)
             view_ctrl = self.vis.get_view_control()
-            view_ctrl.set_up([0, 0, 1])  # Z-up
-            view_ctrl.set_front([1, 1, -0.5])  # Look from diagonal
-            view_ctrl.set_lookat([200, 200, 200])  # Look at 200mm in each direction
-            view_ctrl.set_zoom(0.3)  # Zoom out to see more
+            view_ctrl.set_up([0, 1, 0])  # Y-up for STAR
+            view_ctrl.set_front([1, 0, -0.5])  # Look from front-right
+            view_ctrl.set_lookat([0, 1, 0])  # Look at 1m height (standing person)
+            view_ctrl.set_zoom(0.5)  # Zoom for meter scale
             
             return True
             
         except Exception as e:
-            print(f"❌ Open3D initialization error: {e}")
+            print(f"❌ Open3D error: {e}")
             return False
     
-    def _create_initial_geometries(self):
-        """Create empty geometries for each data type"""
-        # Add coordinate system first
-        self._add_coordinate_system()
-        
-        for name in self.geometry_names:
-            # Create empty point cloud
-            pc = o3d.geometry.PointCloud()
-            self.geometries[name] = pc
-            
-            # Add to visualizer if enabled
-            if self._should_show_geometry(name):
-                self.vis.add_geometry(pc)
-    
-    def _add_coordinate_system(self):
-        """Add coordinate system axes to visualizer"""
-        # Create coordinate frame (X=Red, Y=Green, Z=Blue)
+    def _create_geometries(self):
+        """Create coordinate system and empty geometries"""
+        # STAR coordinate frame (Y-up, meters)
         coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
-            size=100.0,  # 100mm = 10cm axes
+            size=0.25,  # 25cm axes for meter scale
             origin=[0, 0, 0]
         )
         self.vis.add_geometry(coord_frame)
         
-        # Add some reference objects at known locations
-        # Origin sphere (5mm radius)
-        origin_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=5.0)
-        origin_sphere.paint_uniform_color([1, 1, 0])  # Yellow
-        origin_sphere.translate([0, 0, 0])
-        self.vis.add_geometry(origin_sphere)
-        
-        # Reference points at 100mm intervals
-        for i in range(1, 6):  # 100mm, 200mm, 300mm, 400mm, 500mm
-            dist = i * 100.0
-            
-            # X-axis markers (red)
-            marker_x = o3d.geometry.TriangleMesh.create_sphere(radius=3.0)
-            marker_x.paint_uniform_color([1, 0, 0])
-            marker_x.translate([dist, 0, 0])
-            self.vis.add_geometry(marker_x)
-            
-            # Y-axis markers (green)  
-            marker_y = o3d.geometry.TriangleMesh.create_sphere(radius=3.0)
-            marker_y.paint_uniform_color([0, 1, 0])
-            marker_y.translate([0, dist, 0])
-            self.vis.add_geometry(marker_y)
-            
-            # Z-axis markers (blue)
-            marker_z = o3d.geometry.TriangleMesh.create_sphere(radius=3.0)
-            marker_z.paint_uniform_color([0, 0, 1])
-            marker_z.translate([0, 0, dist])
-            self.vis.add_geometry(marker_z)
+        # Empty geometries for data
+        for name in self.geometry_names:
+            if self._should_show(name):
+                pc = o3d.geometry.PointCloud()
+                self.geometries[name] = pc
+                self.vis.add_geometry(pc)
     
-    def _should_show_geometry(self, name: str) -> bool:
-        """Check if geometry should be rendered based on config"""
-        if name == 'robot':
-            return self.config.show_robot
-        elif name == 'human':
-            return self.config.show_human
-        elif name == 'collision':
-            return self.config.show_collision
-        return False
+    def _should_show(self, name: str) -> bool:
+        """Check if geometry should be shown"""
+        return {
+            'robot': self.config.show_robot,
+            'human': self.config.show_human,
+            'collision': self.config.show_collision
+        }.get(name, False)
     
-    def _get_active_renderers(self) -> list:
-        """Get list of active renderer names"""
-        active = []
+    def _get_enabled_features(self) -> str:
+        """Get enabled feature list"""
+        features = []
         if self.config.show_robot:
-            active.append("Robot")
+            features.append("Robot")
         if self.config.show_human:
-            active.append("Human")
+            features.append("Human")
         if self.config.show_collision:
-            active.append("Collision")
-        if self.config.show_layers:
-            active.append(f"Layers({','.join(map(str, self.config.show_layers))})")
-        return active
+            features.append("Collision")
+        return ", ".join(features)
     
     def run(self):
         """Main visualization loop"""
-        print("🎬 Starting visualization loop...")
-        print("   Press ESC or close window to exit")
-        print("   Ultra-quiet mode: Minimal console output")
-        print()
+        print("🎬 Starting visualization (quiet mode)")
+        print("   ESC or close window to exit")
         
         self.is_running = True
-        frame_start_time = time.time()
         
         try:
             while self.is_running:
                 loop_start = time.time()
                 
-                # Update network receiver
+                # Network update
                 self.receiver.update()
                 
-                # Check for new frame data
+                # Process new frames
                 frame = self.receiver.get_latest_frame()
                 if frame and frame.frame_id != self.last_frame_id:
-                    self._process_new_frame(frame)
+                    self._process_frame(frame)
                     self.last_frame_id = frame.frame_id
-                    
-                    # Clear latest frame so we don't process it again
-                    self.receiver.latest_complete_frame = None
                 
-                # Update Open3D visualizer
+                # Open3D update
                 if not self.vis.poll_events():
                     break
                 
-                self._handle_keyboard_input()
                 self.vis.update_renderer()
                 
-                # Update statistics
-                self._update_statistics()
+                # Stats
+                self._update_stats()
                 
                 # Frame rate control
-                self._control_frame_rate(loop_start)
+                self._control_fps(loop_start)
                 
         except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
+            print("\n🛑 Interrupted")
         except Exception as e:
-            print(f"❌ Visualization error: {e}")
+            print(f"❌ Error: {e}")
         finally:
             self._shutdown()
     
-    def _process_new_frame(self, frame: PacketBuffer):
-        """Process new frame data and update geometries"""
+    def _process_frame(self, frame: PacketBuffer):
+        """Process new frame data"""
         try:
-            # Don't process frames we've already handled completely
+            # Skip already processed frames
             if frame.frame_id in self.processed_frames:
                 return
             
-            # Parse frame data
-            new_geometries = self.parser.parse_frame(frame)
+            # Parse frame
+            geometries = self.parser.parse_frame(frame)
             
-            # Track if this frame had complete data
+            # Update geometries
             frame_complete = False
-            
-            # Update each geometry type
             for name in self.geometry_names:
-                if name in new_geometries and self._should_show_geometry(name):
-                    self._update_geometry(name, new_geometries[name])
+                if name in geometries and self._should_show(name):
+                    self._update_geometry(name, geometries[name])
                     
-                    # Special tracking for human mesh completion
-                    if name == 'human':
-                        vertex_count = len(new_geometries[name].points)
-                        if vertex_count > 1000:  # This indicates complete mesh (not just joints)
-                            self.complete_mesh_count += 1
-                            frame_complete = True
-                            # Only log occasionally to reduce spam
-                            if self.complete_mesh_count % 30 == 1:  # Every 30 complete meshes
-                                print(f"   🎯 Complete human mesh rendered: {vertex_count} vertices (frame {frame.frame_id})")
+                    # Track complete human meshes
+                    if name == 'human' and len(geometries[name].points) > 1000:
+                        self.mesh_count += 1
+                        frame_complete = True
             
-            # Mark frame as processed if complete
+            # Mark frame as processed
             if frame_complete:
                 self.processed_frames.add(frame.frame_id)
-                self.last_complete_frame = frame.frame_id
-                
-                # Clean up old processed frames to prevent memory leak
-                self._cleanup_old_processed_frames(frame.frame_id)
+                self._cleanup_processed_frames(frame.frame_id)
             
             self.frame_count += 1
             
         except Exception as e:
             # Only log errors occasionally
             if self.frame_count % 100 == 0:
-                print(f"⚠️  Frame processing error: {e}")
-    
-    def _cleanup_old_processed_frames(self, current_frame_id: int):
-        """Remove old processed frame IDs to prevent memory leaks"""
-        frames_to_remove = {fid for fid in self.processed_frames if fid < current_frame_id - 10}
-        self.processed_frames -= frames_to_remove
-        # Only log cleanup occasionally
-        if frames_to_remove and len(frames_to_remove) > 5:
-            print(f"      🧹 Cleaned up {len(frames_to_remove)} old processed frame IDs")
+                print(f"⚠️  Frame error: {e}")
     
     def _update_geometry(self, name: str, new_geometry: o3d.geometry.PointCloud):
-        """Update existing geometry with new data"""
+        """Update geometry with new data"""
         try:
             old_geometry = self.geometries[name]
-            
-            # Update points and colors
             old_geometry.points = new_geometry.points
             old_geometry.colors = new_geometry.colors
-            
-            # Special handling for collision points (larger size)
-            if name == 'collision':
-                # Note: Open3D doesn't support per-point sizes easily
-                # We could create spheres for collision points if needed
-                pass
-            
-            # Update visualizer
             self.vis.update_geometry(old_geometry)
-            
-        except Exception as e:
-            # Only log geometry errors occasionally
-            if self.frame_count % 100 == 0:
-                print(f"⚠️  Geometry update error ({name}): {e}")
+        except Exception:
+            pass  # Silent fail for geometry updates
     
-    def _handle_keyboard_input(self):
-        """Handle keyboard shortcuts"""
-        # Note: Open3D's keyboard handling is limited
-        # For full keyboard support, we'd need a different approach
-        pass
+    def _cleanup_processed_frames(self, current_frame_id: int):
+        """Clean up old processed frame IDs"""
+        old_frames = {fid for fid in self.processed_frames if fid < current_frame_id - 10}
+        self.processed_frames -= old_frames
     
-    def _update_statistics(self):
-        """Update and display performance statistics"""
+    def _update_stats(self):
+        """Update and print stats periodically"""
         current_time = time.time()
-        
-        # Print stats every 3 seconds instead of every 2
-        if current_time - self.last_stats_time > 3.0:
-            self._print_statistics()
+        if current_time - self.last_stats_time > 5.0:  # Every 5 seconds
+            net_stats = self.receiver.get_statistics()
+            
+            print(f"\r📊 Frames: {self.frame_count} | "
+                  f"Meshes: {self.mesh_count} | "
+                  f"Net: {net_stats.frames_complete} | "
+                  f"Loss: {net_stats.frames_dropped} | "
+                  f"Data: {net_stats.data_rate_mbps:.1f}Mbps",
+                  end="", flush=True)
+            
             self.last_stats_time = current_time
     
-    def _print_statistics(self):
-        """Print current statistics"""
-        net_stats = self.receiver.get_statistics()
-        
-        # Calculate current FPS
-        current_time = time.time()
-        elapsed = current_time - self.last_stats_time
-        if elapsed > 0:
-            current_fps = self.frame_count / (current_time - time.time() + elapsed)
-        else:
-            current_fps = 0
-        
-        # Simplified stats output
-        print(f"\r📊 Frames: {self.frame_count} | "
-              f"Complete Meshes: {self.complete_mesh_count} | "
-              f"Net: {net_stats.frames_complete} frames | "
-              f"FPS: {current_fps:.1f} | "
-              f"Data: {net_stats.data_rate_mbps:.1f} Mbps | "
-              f"Loss: {net_stats.frames_dropped} | "
-              f"Last Complete: {self.last_complete_frame}", 
-              end="", flush=True)
-    
-    def _control_frame_rate(self, loop_start: float):
-        """Control frame rate to target FPS"""
-        target_frame_time = 1.0 / self.config.target_fps
+    def _control_fps(self, loop_start: float):
+        """Control frame rate"""
+        target_time = 1.0 / self.config.target_fps
         elapsed = time.time() - loop_start
-        
-        if elapsed < target_frame_time:
-            time.sleep(target_frame_time - elapsed)
+        if elapsed < target_time:
+            time.sleep(target_time - elapsed)
     
     def _shutdown(self):
         """Clean shutdown"""
@@ -376,60 +259,50 @@ class CollisionVisualizer:
         if self.vis:
             self.vis.destroy_window()
         
-        # Print final statistics
-        print(f"📊 Final Statistics:")
-        print(f"   Total frames processed: {self.frame_count}")
-        print(f"   Complete meshes rendered: {self.complete_mesh_count}")
-        print(f"   Processed frame IDs: {len(self.processed_frames)}")
-        print(f"   Last complete frame: {self.last_complete_frame}")
-        
-        print("✅ Visualizer shutdown complete")
+        print(f"📊 Final: {self.frame_count} frames, {self.mesh_count} complete meshes")
+        print("✅ Shutdown complete")
 
 
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="Robot Collision System Visualizer (ULTRA-OPTIMIZED)",
+        description="Robot Collision Visualizer - STAR Native",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python visualizer.py                    # Default: robot + human + collision
+  python visualizer.py                    # Default: all features
   python visualizer.py --robot --human   # Robot and human only
-  python visualizer.py --collision       # Collision points only
-  python visualizer.py --all             # Everything visible
-  python visualizer.py --point-size 5.0  # Larger points for better visibility
+  python visualizer.py --collision       # Collision only
+  python visualizer.py --point-size 4.0  # Larger points
         """
     )
     
-    # Visibility options
+    # Features
     parser.add_argument('--robot', action='store_true', 
-                       help='Show robot capsules (default: True)')
+                       help='Show robot capsules')
     parser.add_argument('--human', action='store_true',
-                       help='Show human pose (default: True)')
+                       help='Show human mesh/joints')
     parser.add_argument('--collision', action='store_true',
-                       help='Show collision contacts (default: True)')
-    parser.add_argument('--layers', type=int, nargs='*', default=[],
-                       help='Show collision layers (1, 2, 3)')
+                       help='Show collision contacts')
     parser.add_argument('--all', action='store_true',
-                       help='Show everything')
+                       help='Show all features')
     
-    # Display options
+    # Display
     parser.add_argument('--width', type=int, default=1200,
-                       help='Window width (default: 1200)')
+                       help='Window width')
     parser.add_argument('--height', type=int, default=800,
-                       help='Window height (default: 800)')
+                       help='Window height')
     parser.add_argument('--fps', type=int, default=60,
-                       help='Target FPS (default: 60)')
+                       help='Target FPS')
     parser.add_argument('--point-size', type=float, default=2.0,
-                       help='Point size (default: 2.0)')
+                       help='Point size')
     
     return parser.parse_args()
 
 
-def create_config_from_args(args) -> VisualizerConfig:
-    """Create configuration from command line arguments"""
-    
-    # Default visibility (if no flags specified, show robot + human + collision)
+def create_config(args) -> VisualizerConfig:
+    """Create config from arguments"""
+    # Default: show all if no specific flags
     if not any([args.robot, args.human, args.collision, args.all]):
         show_robot = True
         show_human = True
@@ -443,37 +316,33 @@ def create_config_from_args(args) -> VisualizerConfig:
         show_robot=show_robot,
         show_human=show_human,
         show_collision=show_collision,
-        show_layers=args.layers,
         window_width=args.width,
         window_height=args.height,
         target_fps=args.fps,
-        point_size=args.point_size,
-        collision_point_size=args.point_size * 2
+        point_size=args.point_size
     )
 
 
 def main():
     """Main entry point"""
-    print("🎯 ROBOT COLLISION SYSTEM VISUALIZER (ULTRA-OPTIMIZED)")
-    print("=" * 60)
-    print("ULTRA-OPTIMIZED: Minimal console output for production use")
-    print("- Periodic summaries instead of per-packet logging")
-    print("- Error reporting only for critical issues")
-    print("- Clean, readable output that shows what matters")
-    print("=" * 60)
+    print("🎯 ROBOT COLLISION VISUALIZER - STAR NATIVE")
+    print("=" * 50)
+    print("Pure C++ data display - Y-up coordinates, meters")
+    print("Minimal logging - Clean, production-ready")
+    print("=" * 50)
     
-    # Parse command line arguments
+    # Parse arguments
     args = parse_arguments()
-    config = create_config_from_args(args)
+    config = create_config(args)
     
-    # Create and initialize visualizer
+    # Create visualizer
     visualizer = CollisionVisualizer(config)
     
     if not visualizer.initialize():
-        print("❌ Failed to initialize visualizer")
+        print("❌ Initialization failed")
         return 1
     
-    # Start main loop
+    # Run
     try:
         visualizer.run()
     except Exception as e:

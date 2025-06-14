@@ -39,16 +39,16 @@ private:
     
     // Animation parameters (robot coordinates - Z-up, mm)
     const double target_fps_ = 30.0;
-    const double orbit_radius_ = 160.0;  // mm
+    const double orbit_radius_ = 250.0;  // mm
     const double orbit_speed_ = 0.05;    // revolutions per second
-    const Eigen::Vector3d orbit_center_{50.0, 30.0, 320.0}; // mm (robot coordinates)
+    const Eigen::Vector3d orbit_center_{00.0, 00.0, 320.0}; // mm (robot coordinates)
     
     // Robot configuration
     const int num_segments_ = 7;
     const double robot_radius_ = 24.8; // From constants
     
     // Robot positioning in STAR coordinate space (meters)
-    const Eigen::Vector3d robot_offset_{0.5, 0.0, 0.3}; // X=0.5m right, Y=0.0m, Z=0.3m forward
+    const Eigen::Vector3d robot_offset_{0.3, -1.2, 0.0}; // X=0.5m right, Y=0.0m, Z=0.3m forward
     
 public:
     MovingTargetTest() : frame_count_(0), animation_time_(0.0) {}
@@ -196,7 +196,7 @@ private:
         Eigen::Vector3d target;
         target.x() = orbit_center_.x() + orbit_radius_ * std::cos(angle);
         target.y() = orbit_center_.y() + orbit_radius_ * std::sin(angle);
-        target.z() = orbit_center_.z() + 20.0 * std::sin(angle * 6.0); // Slight vertical motion
+        target.z() = orbit_center_.z() + 30.0 * std::sin(angle * 6.0); // Slight vertical motion
         
         return target;
     }
