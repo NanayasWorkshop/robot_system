@@ -30,7 +30,6 @@ private:
     
     // STAR vertex data
     std::vector<Eigen::Vector3d> star_vertices_;
-    std::vector<Eigen::Vector3d> star_joints_;
     
     int frame_count_;
     double animation_time_;
@@ -82,7 +81,8 @@ public:
         std::cout << "🎬 Starting moving target animation..." << std::endl;
         std::cout << "   Target: Circle orbit (radius=" << orbit_radius_ << "mm, speed=" << orbit_speed_ << "rps)" << std::endl;
         std::cout << "   Robot: " << num_segments_ << " segments, FABRIK solver" << std::endl;
-        std::cout << "   Human: Real STAR T-pose (" << star_vertices_.size() << " vertices)" << std::endl;
+        std::cout << "   Human: Real STAR with animated pose (" << star_vertices_.size() << " vertices)" << std::endl;
+        std::cout << "   Animation: Subtle arm/leg movement for collision testing" << std::endl;
         std::cout << "   Press Ctrl+C to stop" << std::endl;
         std::cout << std::endl;
         
@@ -108,11 +108,11 @@ public:
                 continue;
             }
             
-            // Use real STAR data (T-pose for now, vertices already loaded)
-            // NOTE: For now we keep T-pose, but this is where dynamic STAR calls would go
+            // NEW: Generate animated STAR joints
+            auto star_joints = create_animated_star_joints(animation_time_);
             
             // Transform human to collision coordinates
-            auto star_bridge_result = STARCollisionBridge::transform_star_to_collision_coords(star_joints_);
+            auto star_bridge_result = STARCollisionBridge::transform_star_to_collision_coords(star_joints);
             if (!star_bridge_result.success) {
                 std::cerr << "⚠️  STAR bridge failed: " << star_bridge_result.error_message << std::endl;
                 continue;
@@ -124,7 +124,7 @@ public:
             
             // Publish complete frame via visualization system
             bool publish_success = publisher_.publish_collision_frame(
-                robot_bridge_result.data, star_joints_, star_vertices_, 
+                robot_bridge_result.data, star_joints, star_vertices_, 
                 collision_result, collision_result.computation_time_ms);
             
             if (!publish_success) {
@@ -174,12 +174,8 @@ private:
         // Print vertex statistics
         std::cout << VertexLoader::get_vertex_statistics(star_vertices_) << std::endl;
         
-        // Create corresponding T-pose joints (simplified for now)
-        star_joints_ = create_star_t_pose_joints();
-        
         std::cout << "✅ STAR vertices loaded successfully" << std::endl;
         std::cout << "   Vertices: " << star_vertices_.size() << std::endl;
-        std::cout << "   Joints: " << star_joints_.size() << std::endl;
         
         return true;
     }
@@ -201,17 +197,14 @@ private:
         return FabrikSolverBlock::solve(target, num_segments_, FABRIK_TOLERANCE, FABRIK_MAX_ITERATIONS);
     }
     
-    // UPDATED: Create proper STAR joint positions that match the vertex data
-    std::vector<Eigen::Vector3d> create_star_t_pose_joints() {
+    // NEW: Create animated STAR joint positions
+    std::vector<Eigen::Vector3d> create_animated_star_joints(double time) {
         std::vector<Eigen::Vector3d> joints;
         
-        // Standard T-pose for STAR model (24 joints)
-        // These should correspond to the actual STAR joint positions
+        // Standard T-pose for STAR model (24 joints) with subtle animations
         // STAR coordinate system: Y-up, meters
         
-        // NOTE: These are approximate T-pose positions
-        // For full accuracy, these should come from STAR joint regressor
-        
+        // Base pose positions
         joints.push_back(Eigen::Vector3d(0.0, 0.0, 0.0));           // 0: pelvis
         joints.push_back(Eigen::Vector3d(-0.1, 0.0, 0.0));         // 1: left_hip
         joints.push_back(Eigen::Vector3d(0.1, 0.0, 0.0));          // 2: right_hip
@@ -237,6 +230,47 @@ private:
         joints.push_back(Eigen::Vector3d(-0.65, 0.75, 0.0));       // 22: left_hand
         joints.push_back(Eigen::Vector3d(0.65, 0.75, 0.0));        // 23: right_hand
         
+        // Animation parameters - small movements only
+        const double arm_freq = 0.8;      // Arm swing frequency (Hz)
+        const double leg_freq = 0.6;      // Leg movement frequency (Hz)
+        const double arm_amplitude = 0.08; // Max 8cm arm movement
+        const double leg_amplitude = 0.05; // Max 5cm leg movement
+        
+        // Animate left arm (shoulder, elbow, wrist, hand) - subtle forward/back swing
+        double left_arm_offset = arm_amplitude * std::sin(2.0 * M_PI * arm_freq * time);
+        joints[16].z() += left_arm_offset;  // left_shoulder
+        joints[18].z() += left_arm_offset * 0.8;  // left_elbow (slightly less)
+        joints[20].z() += left_arm_offset * 0.6;  // left_wrist
+        joints[22].z() += left_arm_offset * 0.5;  // left_hand
+        
+        // Animate right arm (opposite phase)
+        double right_arm_offset = -arm_amplitude * std::sin(2.0 * M_PI * arm_freq * time);
+        joints[17].z() += right_arm_offset;  // right_shoulder
+        joints[19].z() += right_arm_offset * 0.8;  // right_elbow
+        joints[21].z() += right_arm_offset * 0.6;  // right_wrist
+        joints[23].z() += right_arm_offset * 0.5;  // right_hand
+        
+        // Animate legs (subtle weight shift)
+        double leg_shift = leg_amplitude * std::sin(2.0 * M_PI * leg_freq * time * 0.7);  // Slower than arms
+        
+        // Left leg slight movement
+        joints[1].x() += -leg_shift * 0.3;  // left_hip
+        joints[4].x() += -leg_shift * 0.5;  // left_knee
+        joints[7].x() += -leg_shift * 0.4;  // left_ankle
+        joints[10].x() += -leg_shift * 0.3; // left_foot
+        
+        // Right leg opposite movement
+        joints[2].x() += leg_shift * 0.3;   // right_hip
+        joints[5].x() += leg_shift * 0.5;   // right_knee
+        joints[8].x() += leg_shift * 0.4;   // right_ankle
+        joints[11].x() += leg_shift * 0.3;  // right_foot
+        
+        // Very subtle spine movement (breathing-like)
+        double spine_movement = 0.01 * std::sin(2.0 * M_PI * 0.3 * time);  // Slow, tiny movement
+        joints[3].z() += spine_movement;    // spine1
+        joints[6].z() += spine_movement * 0.8;  // spine2
+        joints[9].z() += spine_movement * 0.6;  // spine3
+        
         return joints;
     }
     
@@ -259,16 +293,17 @@ private:
         std::cout << " | Packets: " << publisher_stats.network_stats.packets_sent
                   << " | Success: " << std::setprecision(1) << publisher_stats.network_stats.success_rate << "%"
                   << " | STAR: " << star_vertices_.size() << " verts"
+                  << " | Animated Pose"
                   << std::endl;
     }
 };
 
 int main() {
-    std::cout << "🎯 MOVING TARGET COLLISION TEST (WITH REAL STAR VERTICES)" << std::endl;
+    std::cout << "🎯 MOVING TARGET COLLISION TEST (WITH ANIMATED STAR POSE)" << std::endl;
     std::cout << "==========================================================" << std::endl;
-    std::cout << "Real-time collision detection with animated target" << std::endl;
+    std::cout << "Real-time collision detection with animated target + human" << std::endl;
     std::cout << "Pipeline: FABRIK → Bridges → Collision → Visualization" << std::endl;
-    std::cout << "STAR Integration: Real 6890 vertices from T-pose model" << std::endl;
+    std::cout << "STAR Integration: Real 6890 vertices with subtle pose animation" << std::endl;
     std::cout << std::endl;
     
     MovingTargetTest test;
