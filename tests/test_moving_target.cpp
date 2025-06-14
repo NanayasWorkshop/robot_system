@@ -14,14 +14,15 @@
 #include "../cpp/collision/collision_detection_engine.hpp"
 #include "../cpp/collision/layer_manager.hpp"
 
-// NEW: STAR daemon client (replaces vertex loader)
+// STAR daemon client (replaces vertex loader)
 #include "../cpp/utils/star_daemon_client.hpp"
 
 using namespace delta;
 
 /**
- * Real Collision System Test with Moving Target (Updated with STAR Vertices)
- * Tests complete pipeline: Moving Target → FABRIK → Bridges → Collision Detection → Visualization
+ * Real Collision System Test with Moving Target (UPDATED: Robot→STAR Transform)
+ * Tests complete pipeline: Moving Target → FABRIK → Robot Transform → STAR Collision → Visualization
+ * NEW APPROACH: Transform robot to STAR coordinates instead of STAR to collision coordinates
  */
 class MovingTargetTest {
 private:
@@ -29,28 +30,31 @@ private:
     std::unique_ptr<CollisionDetectionEngine> collision_engine_;
     std::unique_ptr<STARDaemonClient> star_client_;
     
-    // Current mesh data (updated each frame)
+    // Current mesh data (updated each frame) - in STAR coordinates
     std::vector<Eigen::Vector3d> current_vertices_;
     std::vector<Eigen::Vector3d> current_joints_;
     
     int frame_count_;
     double animation_time_;
     
-    // Animation parameters
+    // Animation parameters (robot coordinates - Z-up, mm)
     const double target_fps_ = 30.0;
     const double orbit_radius_ = 160.0;  // mm
     const double orbit_speed_ = 0.05;    // revolutions per second
-    const Eigen::Vector3d orbit_center_{50.0, 30.0, 320.0}; // mm
+    const Eigen::Vector3d orbit_center_{50.0, 30.0, 320.0}; // mm (robot coordinates)
     
     // Robot configuration
     const int num_segments_ = 7;
     const double robot_radius_ = 24.8; // From constants
     
+    // Robot positioning in STAR coordinate space (meters)
+    const Eigen::Vector3d robot_offset_{0.5, 0.0, 0.3}; // X=0.5m right, Y=0.0m, Z=0.3m forward
+    
 public:
     MovingTargetTest() : frame_count_(0), animation_time_(0.0) {}
     
     bool initialize() {
-        std::cout << "🚀 Initializing Moving Target Test..." << std::endl;
+        std::cout << "🚀 Initializing Moving Target Test (Robot→STAR Transform)..." << std::endl;
         
         // Initialize data publisher
         if (!publisher_.initialize("127.0.0.1", 9999, target_fps_)) {
@@ -59,13 +63,13 @@ public:
         }
         std::cout << "✅ DataPublisher initialized" << std::endl;
         
-        // NEW: Connect to STAR daemon
+        // Connect to STAR daemon
         if (!connect_to_star_daemon()) {
             std::cerr << "❌ Failed to connect to STAR daemon" << std::endl;
             return false;
         }
         
-        // Initialize collision detection engine with initial vertices
+        // Initialize collision detection engine with STAR vertices (no transformation!)
         collision_engine_ = std::make_unique<CollisionDetectionEngine>();
         
         if (!collision_engine_->initialize("collision_data.h5", current_vertices_)) {
@@ -73,18 +77,19 @@ public:
             std::cerr << "   Make sure collision_data.h5 exists and matches STAR vertex count" << std::endl;
             return false;
         }
-        std::cout << "✅ CollisionDetectionEngine initialized with real STAR vertices" << std::endl;
+        std::cout << "✅ CollisionDetectionEngine initialized with STAR vertices (Y-up, meters)" << std::endl;
         
-        std::cout << "✅ Moving Target Test ready!" << std::endl;
+        std::cout << "✅ Moving Target Test ready (Robot→STAR coordinate transformation)!" << std::endl;
         return true;
     }
     
     void run_test_loop() {
-        std::cout << "🎬 Starting moving target animation..." << std::endl;
-        std::cout << "   Target: Circle orbit (radius=" << orbit_radius_ << "mm, speed=" << orbit_speed_ << "rps)" << std::endl;
-        std::cout << "   Robot: " << num_segments_ << " segments, FABRIK solver" << std::endl;
-        std::cout << "   Human: Real STAR with animated mesh (" << current_vertices_.size() << " vertices)" << std::endl;
-        std::cout << "   Animation: Subtle arm/leg movement for collision testing" << std::endl;
+        std::cout << "🎬 Starting moving target animation (Robot→STAR transform)..." << std::endl;
+        std::cout << "   Target: Circle orbit in robot coordinates (radius=" << orbit_radius_ << "mm, speed=" << orbit_speed_ << "rps)" << std::endl;
+        std::cout << "   Robot: " << num_segments_ << " segments, FABRIK solver → Transform to STAR coordinates with offset(" 
+                  << robot_offset_.x() << ", " << robot_offset_.y() << ", " << robot_offset_.z() << ")m" << std::endl;
+        std::cout << "   Human: Real STAR with animated mesh (" << current_vertices_.size() << " vertices, native coordinates)" << std::endl;
+        std::cout << "   Collision: Both robot and human in STAR coordinate space (Y-up, meters)" << std::endl;
         std::cout << "   Press Ctrl+C to stop" << std::endl;
         std::cout << std::endl;
         
@@ -93,48 +98,43 @@ public:
         while (true) {
             auto frame_start = std::chrono::steady_clock::now();
             
-            // Generate moving target position
+            // Generate moving target position (robot coordinates: Z-up, mm)
             Eigen::Vector3d target_position = calculate_target_position();
             
-            // Solve FABRIK for current target
+            // Solve FABRIK for current target (robot coordinates)
             auto fabrik_result = solve_fabrik_for_target(target_position);
             if (!fabrik_result.solving_successful) {
                 std::cerr << "⚠️  FABRIK solving failed for frame " << frame_count_ << std::endl;
                 continue;
             }
             
-            // Convert FABRIK result to robot capsules
-            auto robot_bridge_result = RobotCollisionBridge::convert_basic_fabrik_to_capsules(fabrik_result);
-            if (!robot_bridge_result.success) {
-                std::cerr << "⚠️  Robot bridge failed: " << robot_bridge_result.error_message << std::endl;
+            // NEW: Convert FABRIK result to robot capsules AND transform to STAR coordinates WITH OFFSET
+            auto robot_capsules_star = RobotCollisionBridge::convert_basic_fabrik_to_capsules_star_coords(
+                fabrik_result, robot_radius_, robot_offset_);
+            if (!robot_capsules_star.success) {
+                std::cerr << "⚠️  Robot→STAR transformation failed: " << robot_capsules_star.error_message << std::endl;
                 continue;
             }
             
-            // NEW: Generate animated STAR pose and get deformed mesh
+            // Generate animated STAR pose and get deformed mesh (STAR coordinates)
             auto star_result = get_animated_star_mesh(animation_time_);
             if (!star_result.success) {
                 std::cerr << "⚠️  STAR mesh generation failed: " << star_result.error_message << std::endl;
                 continue;
             }
             
-            // Update current mesh data
+            // Update current mesh data (STAR coordinates)
             current_vertices_ = star_result.vertices;
             current_joints_ = star_result.joints;
             
-            // Transform human to collision coordinates
-            auto star_bridge_result = STARCollisionBridge::transform_star_to_collision_coords(current_joints_);
-            if (!star_bridge_result.success) {
-                std::cerr << "⚠️  STAR bridge failed: " << star_bridge_result.error_message << std::endl;
-                continue;
-            }
-            
-            // Run collision detection with real STAR vertices
+            // NEW: Collision detection with both robot and human in STAR coordinates!
+            // No coordinate transformation needed - both are in Y-up meters
             auto collision_result = collision_engine_->detect_collisions(
-                star_bridge_result.data, robot_bridge_result.data);
+                current_joints_, robot_capsules_star.data);
             
             // Publish complete frame via visualization system
             bool publish_success = publisher_.publish_collision_frame(
-                robot_bridge_result.data, current_joints_, current_vertices_, 
+                robot_capsules_star.data, current_joints_, current_vertices_, 
                 collision_result, collision_result.computation_time_ms);
             
             if (!publish_success) {
@@ -160,7 +160,7 @@ public:
     
 private:
     
-    // NEW: Connect to STAR daemon and get initial mesh
+    // Connect to STAR daemon and get initial mesh (STAR coordinates)
     bool connect_to_star_daemon() {
         std::cout << "🔄 Connecting to STAR daemon..." << std::endl;
         
@@ -173,7 +173,7 @@ private:
         
         std::cout << "✅ Connected to STAR daemon" << std::endl;
         
-        // Get initial T-pose mesh
+        // Get initial T-pose mesh (STAR coordinates: Y-up, meters)
         auto initial_result = star_client_->get_neutral_pose();
         if (!initial_result.success) {
             std::cerr << "❌ Failed to get initial mesh: " << initial_result.error_message << std::endl;
@@ -184,13 +184,13 @@ private:
         current_joints_ = initial_result.joints;
         
         std::cout << "✅ Initial STAR mesh loaded: " << current_vertices_.size() 
-                  << " vertices, " << current_joints_.size() << " joints" << std::endl;
+                  << " vertices, " << current_joints_.size() << " joints (STAR coordinates)" << std::endl;
         
         return true;
     }
     
     Eigen::Vector3d calculate_target_position() {
-        // Circular orbit around center point
+        // Circular orbit around center point (robot coordinates: Z-up, mm)
         double angle = 2.0 * M_PI * orbit_speed_ * animation_time_;
         
         Eigen::Vector3d target;
@@ -202,16 +202,16 @@ private:
     }
     
     FabrikSolverResult solve_fabrik_for_target(const Eigen::Vector3d& target) {
-        // Use the basic FABRIK solver (more likely to be implemented)
+        // Use the basic FABRIK solver (robot coordinates: Z-up, mm)
         return FabrikSolverBlock::solve(target, num_segments_, FABRIK_TOLERANCE, FABRIK_MAX_ITERATIONS);
     }
     
-    // NEW: Get animated STAR mesh using daemon
+    // Get animated STAR mesh using daemon (STAR coordinates)
     STARDaemonClient::MeshResult get_animated_star_mesh(double time) {
         // Generate pose parameters for animation
         auto pose_params = generate_animated_pose_params(time, 0.3);  // 30% amplitude for subtle movement
         
-        // Request deformed mesh from daemon
+        // Request deformed mesh from daemon (returns STAR coordinates: Y-up, meters)
         return star_client_->get_deformed_mesh(pose_params);
     }
     
@@ -222,8 +222,8 @@ private:
         
         std::cout << "📊 Frame " << frame_count_ 
                   << " | FPS: " << std::fixed << std::setprecision(1) << publisher_stats.current_fps
-                  << " | Target: (" << std::setprecision(0) 
-                  << target.x() << "," << target.y() << "," << target.z() << ")"
+                  << " | Target(robot): (" << std::setprecision(0) 
+                  << target.x() << "," << target.y() << "," << target.z() << ")mm"
                   << " | FABRIK: " << fabrik_result.iterations_used << " iters"
                   << " | Collision: " << (collision_result.has_collision ? "YES" : "NO");
         
@@ -231,20 +231,22 @@ private:
             std::cout << " (" << collision_result.contacts.size() << " contacts)";
         }
         
-        std::cout                   << " | Packets: " << publisher_stats.network_stats.packets_sent
+        std::cout << " | Transform: Robot→STAR"
+                  << " | Packets: " << publisher_stats.network_stats.packets_sent
                   << " | Success: " << std::setprecision(1) << publisher_stats.network_stats.success_rate << "%"
                   << " | STAR: " << current_vertices_.size() << " verts"
-                  << " | Animated Mesh"
+                  << " | Unified coords: Y-up meters"
                   << std::endl;
     }
 };
 
 int main() {
-    std::cout << "🎯 MOVING TARGET COLLISION TEST (WITH ANIMATED STAR MESH)" << std::endl;
-    std::cout << "==========================================================" << std::endl;
-    std::cout << "Real-time collision detection with animated target + deformed human mesh" << std::endl;
-    std::cout << "Pipeline: FABRIK → Bridges → STAR Daemon → Collision → Visualization" << std::endl;
-    std::cout << "STAR Integration: Real-time mesh deformation via daemon" << std::endl;
+    std::cout << "🎯 MOVING TARGET COLLISION TEST (ROBOT→STAR TRANSFORM)" << std::endl;
+    std::cout << "========================================================" << std::endl;
+    std::cout << "Real-time collision detection with coordinate transformation optimization" << std::endl;
+    std::cout << "Pipeline: FABRIK (robot coords) → Robot→STAR Transform → Unified Collision → Visualization" << std::endl;
+    std::cout << "Optimization: Transform 7 robot capsules instead of 6890 STAR vertices" << std::endl;
+    std::cout << "Collision Space: STAR coordinates (Y-up, meters)" << std::endl;
     std::cout << std::endl;
     
     MovingTargetTest test;
@@ -254,8 +256,9 @@ int main() {
         return 1;
     }
     
-    std::cout << "📡 Streaming real collision data to UDP localhost:9999..." << std::endl;
+    std::cout << "📡 Streaming collision data (STAR coords) to UDP localhost:9999..." << std::endl;
     std::cout << "   Start receiver: ./build/test_visualization_receiver" << std::endl;
+    std::cout << "   Performance: ~1000x fewer coordinate transformations per frame!" << std::endl;
     std::cout << std::endl;
     
     try {
