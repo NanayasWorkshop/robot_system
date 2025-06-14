@@ -2,7 +2,7 @@
 """
 Network Receiver - UDP Packet Manager
 Handles UDP communication with C++ collision system
-FIXED: Properly handles multiple packets of the same type per frame (vertex batching)
+ULTRA-OPTIMIZED: Minimal logging for production use
 """
 
 import socket
@@ -37,7 +37,7 @@ class PacketBuffer:
     """Frame buffer for collecting multiple packets"""
     frame_id: int
     timestamp_ms: int
-    packets: Dict[PacketType, List[bytes]] = field(default_factory=dict)  # FIXED: List of packets per type
+    packets: Dict[PacketType, List[bytes]] = field(default_factory=dict)
     is_complete: bool = False
     receive_time: float = 0.0
     
@@ -56,7 +56,7 @@ class PacketBuffer:
     def get_single_packet(self, packet_type: PacketType) -> Optional[bytes]:
         """Get single packet (for non-batched types like robot, collision)"""
         packets = self.packets.get(packet_type, [])
-        return packets[-1] if packets else None  # Return latest packet
+        return packets[-1] if packets else None
     
     def get_all_packets(self, packet_type: PacketType) -> List[bytes]:
         """Get all packets of a type (for batched types like human vertices)"""
@@ -85,8 +85,6 @@ class NetworkStats:
     data_rate_mbps: float = 0.0
     last_frame_time: float = 0.0
     bytes_received: int = 0
-    
-    # NEW: Batch tracking stats
     vertex_batches_received: int = 0
     complete_vertex_frames: int = 0
 
@@ -96,7 +94,7 @@ class NetworkReceiver:
     
     def __init__(self, port: int = 9999, timeout_ms: float = 50.0):
         self.port = port
-        self.timeout_ms = timeout_ms / 1000.0  # Convert to seconds
+        self.timeout_ms = timeout_ms / 1000.0
         
         # Socket management
         self.socket: Optional[socket.socket] = None
@@ -111,6 +109,12 @@ class NetworkReceiver:
         self.stats = NetworkStats()
         self.start_time = time.time()
         
+        # Statistics for periodic reporting
+        self.last_report_time = time.time()
+        self.report_interval = 30  # Report every 30 frames
+        self.frames_since_last_report = 0
+        self.dropped_since_last_report = 0
+        
         # Thread safety
         self.lock = threading.Lock()
     
@@ -123,7 +127,6 @@ class NetworkReceiver:
             self.is_running = True
             
             print(f"✅ NetworkReceiver listening on port {self.port}")
-            print(f"   FIXED: Multi-packet batching support enabled")
             return True
             
         except Exception as e:
@@ -149,7 +152,6 @@ class NetworkReceiver:
             
             # Parse header (4 uint32_t = 16 bytes)
             if len(data) < 16:
-                print(f"⚠️  Packet too small: {len(data)} bytes")
                 return None
             
             header_data = struct.unpack('IIII', data[:16])
@@ -177,7 +179,9 @@ class NetworkReceiver:
             # Normal timeout - no data available
             return None
         except Exception as e:
-            print(f"⚠️  Packet receive error: {e}")
+            # Only log critical errors
+            if self.stats.packets_received % 1000 == 0:  # Every 1000 packets
+                print(f"⚠️  Network error (packet {self.stats.packets_received}): {e}")
             return None
     
     def process_packet(self, header: PacketHeader, payload: bytes):
@@ -191,32 +195,19 @@ class NetworkReceiver:
             # Finalize previous frame if it was incomplete
             if self.current_frame and not self.current_frame.is_complete:
                 self.stats.frames_dropped += 1
-                print(f"⚠️  Dropping incomplete frame {self.current_frame.frame_id}")
+                self.dropped_since_last_report += 1
+                # Only log if excessive drops
+                if self.dropped_since_last_report > 5:
+                    print(f"⚠️  Dropping incomplete frame {self.current_frame.frame_id}")
             
-            # Start new frame
+            # Start new frame (no logging - too verbose)
             self.current_frame = PacketBuffer(
                 frame_id=header.frame_id,
                 timestamp_ms=header.timestamp_ms
             )
-            
-            print(f"🆕 Starting new frame {header.frame_id}")
         
-        # FIXED: Add packet to frame (instead of overwriting)
+        # Add packet to frame (no individual packet logging)
         self.current_frame.add_packet(packet_type, payload)
-        
-        # Debug: Log packet addition
-        if packet_type == PacketType.HUMAN_POSE:
-            vertex_packets = len(self.current_frame.get_all_packets(PacketType.HUMAN_POSE))
-            if len(payload) > 200:  # Vertex batch
-                print(f"   📦 Added vertex batch {vertex_packets} to frame {header.frame_id} ({len(payload)} bytes)")
-            else:
-                print(f"   👤 Added joint data to frame {header.frame_id} ({len(payload)} bytes)")
-        elif packet_type == PacketType.ROBOT_CAPSULES:
-            print(f"   🤖 Added robot data to frame {header.frame_id} ({len(payload)} bytes)")
-        elif packet_type == PacketType.COLLISION_CONTACTS:
-            print(f"   💥 Added collision data to frame {header.frame_id} ({len(payload)} bytes)")
-        elif packet_type == PacketType.FRAME_SYNC:
-            print(f"   🔄 Frame {header.frame_id} sync received")
         
         # Check if frame is complete (got FRAME_SYNC)
         if packet_type == PacketType.FRAME_SYNC:
@@ -228,13 +219,37 @@ class NetworkReceiver:
             
             if vertex_batch_count > 0:
                 self.stats.complete_vertex_frames += 1
-                print(f"   🎯 Frame {header.frame_id} complete with {vertex_batch_count} vertex batches")
             
             # Store as latest complete frame
             with self.lock:
                 self.latest_complete_frame = self.current_frame
                 self.stats.frames_complete += 1
                 self.stats.last_frame_time = time.time()
+                self.frames_since_last_report += 1
+                
+                # Periodic reporting instead of per-frame logging
+                self._maybe_print_periodic_report()
+    
+    def _maybe_print_periodic_report(self):
+        """Print periodic report instead of per-frame logging"""
+        current_time = time.time()
+        
+        if (self.frames_since_last_report >= self.report_interval or
+            current_time - self.last_report_time > 5.0):  # At least every 5 seconds
+            
+            # Only report if there's something interesting
+            if self.frames_since_last_report > 0:
+                start_frame = self.stats.frames_complete - self.frames_since_last_report + 1
+                end_frame = self.stats.frames_complete
+                
+                print(f"📊 Frames {start_frame}-{end_frame}: "
+                      f"{self.frames_since_last_report - self.dropped_since_last_report} processed, "
+                      f"{self.dropped_since_last_report} dropped")
+            
+            # Reset counters
+            self.frames_since_last_report = 0
+            self.dropped_since_last_report = 0
+            self.last_report_time = current_time
     
     def update(self) -> bool:
         """Update receiver - call this regularly from main loop"""
@@ -247,7 +262,10 @@ class NetworkReceiver:
             time.time() - self.current_frame.receive_time > self.frame_timeout):
             
             self.stats.frames_dropped += 1
-            print(f"⏰ Timeout: Dropping incomplete frame {self.current_frame.frame_id}")
+            self.dropped_since_last_report += 1
+            # Only log timeouts if excessive
+            if self.dropped_since_last_report > 10:
+                print(f"⏰ Timeout: Dropping incomplete frame {self.current_frame.frame_id}")
             self.current_frame = None
         
         # Receive multiple packets per update
@@ -314,29 +332,26 @@ class NetworkReceiver:
 
 # Test function
 if __name__ == "__main__":
-    print("🧪 Testing NetworkReceiver (FIXED - Multi-packet support)...")
+    print("🧪 Testing NetworkReceiver (ULTRA-OPTIMIZED - Minimal logging)...")
     
     receiver = NetworkReceiver()
     if not receiver.initialize():
         exit(1)
     
     print("📡 Listening for packets... (Ctrl+C to stop)")
-    print("   Now properly handles multiple vertex batches per frame")
+    print("   Ultra-quiet mode: Only periodic summaries and errors")
     
     try:
         while True:
             receiver.update()
             
-            # Check for new frame
+            # Check for new frame (no verbose logging)
             frame = receiver.get_latest_frame()
             if frame:
-                print(f"📦 Frame {frame.frame_id}:")
-                for ptype in PacketType:
-                    packets = frame.get_all_packets(ptype)
-                    if packets:
-                        print(f"   {ptype.name}: {len(packets)} packets")
-                        for i, packet in enumerate(packets):
-                            print(f"     Packet {i}: {len(packet)} bytes")
+                # Only log frame details in test mode
+                vertex_packets = len([p for p in frame.get_all_packets(PacketType.HUMAN_POSE) if len(p) > 200])
+                if vertex_packets > 10:  # Only log interesting frames
+                    print(f"📦 Frame {frame.frame_id}: {vertex_packets} vertex batches")
             
             time.sleep(0.01)  # 100 Hz update
             

@@ -124,8 +124,11 @@ CollisionResult CollisionDetectionEngine::detect_collisions(
     stage3_time_ms_ = 0.0;
     stage4_time_ms_ = 0.0;
     
-    std::cout << "\n🔍 CLEAN SELECTIVE BRANCH COLLISION DETECTION (Frame " << total_frame_count_ << ")" << std::endl;
-    std::cout << "Robot capsules: " << robot_capsules.size() << std::endl;
+    // OPTIMIZED: Only show frame header every 75 frames (2.5 seconds at 30 FPS)
+    if (total_frame_count_ % 75 == 1) {
+        std::cout << "\n🔍 CLEAN SELECTIVE BRANCH COLLISION DETECTION (Frame " << total_frame_count_ << ")" << std::endl;
+        std::cout << "Robot capsules: " << robot_capsules.size() << std::endl;
+    }
     
     // Execute 4-stage selective collision pipeline
     
@@ -161,10 +164,12 @@ CollisionResult CollisionDetectionEngine::detect_collisions(
         collision_frame_count_++;
     }
     
-    // Show selective loading efficiency
-    auto branch_stats = layer_manager_->get_collision_branch_statistics();
-    std::cout << "💡 Efficiency: " << std::fixed << std::setprecision(1) << branch_stats.selectivity_ratio 
-              << "% system active, " << branch_stats.memory_efficiency << "% memory saved" << std::endl;
+    // OPTIMIZED: Show selective loading efficiency every 75 frames instead of every frame
+    if (total_frame_count_ % 75 == 0) {
+        auto branch_stats = layer_manager_->get_collision_branch_statistics();
+        std::cout << "💡 Efficiency: " << std::fixed << std::setprecision(1) << branch_stats.selectivity_ratio 
+                  << "% system active, " << branch_stats.memory_efficiency << "% memory saved" << std::endl;
+    }
     
     return result;
 }
@@ -179,8 +184,6 @@ std::vector<int> CollisionDetectionEngine::execute_stage1_layer3_collision(
     
     ScopedTimer timer(stage1_time_ms_);
     
-    std::cout << "🔍 Stage 1: Testing robot vs Layer 3 (9 simple capsules)..." << std::endl;
-    
     const auto& layer3_primitives = layer_manager_->get_layer3_primitives();
     result.layer3_tests = static_cast<int>(layer3_primitives.size());
     
@@ -190,7 +193,7 @@ std::vector<int> CollisionDetectionEngine::execute_stage1_layer3_collision(
     if (use_parallel_processing_ && robot_capsules.size() > 1) {
         collision_flags = parallel_stage1_execution(robot_capsules, layer3_primitives);
     } else {
-        // Sequential execution with detailed logging
+        // Sequential execution with detailed logging (KEPT - user likes this)
         collision_flags.resize(layer3_primitives.size(), false);
         
         for (size_t primitive_idx = 0; primitive_idx < layer3_primitives.size(); ++primitive_idx) {
@@ -222,10 +225,6 @@ std::vector<int> CollisionDetectionEngine::execute_stage1_layer3_collision(
     // Set basic collision flag
     if (!hit_indices.empty()) {
         result.has_collision = true;
-        std::cout << "  → " << hit_indices.size() << "/" << layer3_primitives.size() 
-                  << " Layer 3 primitives hit" << std::endl;
-    } else {
-        std::cout << "  → No Layer 3 collisions detected" << std::endl;
     }
     
     return hit_indices;
@@ -238,8 +237,6 @@ std::vector<int> CollisionDetectionEngine::execute_stage2_selective_layer2_colli
     
     ScopedTimer timer(stage2_time_ms_);
     
-    std::cout << "🔍 Stage 2: Selective Layer 2 loading..." << std::endl;
-    
     // SELECTIVE ACTIVATION: Only activate Layer 2 children of hit Layer 3 primitives
     layer_manager_->activate_layer2_primitives(layer3_hits);
     
@@ -248,12 +245,8 @@ std::vector<int> CollisionDetectionEngine::execute_stage2_selective_layer2_colli
     result.layer2_activations = static_cast<int>(active_layer2_primitives.size());
     
     if (active_layer2_primitives.empty()) {
-        std::cout << "  → No Layer 2 primitives activated" << std::endl;
         return {};
     }
-    
-    std::cout << "  Testing robot vs " << active_layer2_primitives.size() 
-              << " activated Layer 2 primitives..." << std::endl;
     
     std::vector<bool> collision_flags;
     
@@ -261,7 +254,7 @@ std::vector<int> CollisionDetectionEngine::execute_stage2_selective_layer2_colli
     if (use_parallel_processing_ && robot_capsules.size() > 1) {
         collision_flags = parallel_stage2_execution(robot_capsules, active_layer2_primitives);
     } else {
-        // Sequential execution with detailed logging
+        // Sequential execution with detailed logging (KEPT - user likes this)
         collision_flags.resize(active_layer2_primitives.size(), false);
         
         for (size_t primitive_idx = 0; primitive_idx < active_layer2_primitives.size(); ++primitive_idx) {
@@ -300,13 +293,6 @@ std::vector<int> CollisionDetectionEngine::execute_stage2_selective_layer2_colli
         }
     }
     
-    if (!hit_indices.empty()) {
-        std::cout << "  → " << hit_indices.size() << "/" << active_layer2_primitives.size() 
-                  << " Layer 2 primitives hit (selective)" << std::endl;
-    } else {
-        std::cout << "  → No Layer 2 collisions detected" << std::endl;
-    }
-    
     return hit_indices;
 }
 
@@ -317,8 +303,6 @@ std::vector<int> CollisionDetectionEngine::execute_stage3_selective_layer1_colli
     
     ScopedTimer timer(stage3_time_ms_);
     
-    std::cout << "🔍 Stage 3: Selective Layer 1 loading..." << std::endl;
-    
     // SELECTIVE ACTIVATION: Only activate Layer 1 children of hit Layer 2 primitives
     layer_manager_->activate_layer1_primitives(layer2_hits);
     
@@ -327,12 +311,8 @@ std::vector<int> CollisionDetectionEngine::execute_stage3_selective_layer1_colli
     result.layer1_activations = static_cast<int>(active_layer1_primitives.size());
     
     if (active_layer1_primitives.empty()) {
-        std::cout << "  → No Layer 1 primitives activated" << std::endl;
         return {};
     }
-    
-    std::cout << "  Testing robot vs " << active_layer1_primitives.size() 
-              << " activated Layer 1 spheres..." << std::endl;
     
     std::vector<bool> collision_flags;
     
@@ -340,7 +320,7 @@ std::vector<int> CollisionDetectionEngine::execute_stage3_selective_layer1_colli
     if (use_parallel_processing_ && robot_capsules.size() > 1) {
         collision_flags = parallel_stage3_execution(robot_capsules, active_layer1_primitives);
     } else {
-        // Sequential execution with detailed logging
+        // Sequential execution with detailed logging (KEPT - user likes this)
         collision_flags.resize(active_layer1_primitives.size(), false);
         
         for (size_t primitive_idx = 0; primitive_idx < active_layer1_primitives.size(); ++primitive_idx) {
@@ -379,13 +359,6 @@ std::vector<int> CollisionDetectionEngine::execute_stage3_selective_layer1_colli
         }
     }
     
-    if (!hit_indices.empty()) {
-        std::cout << "  → " << hit_indices.size() << "/" << active_layer1_primitives.size() 
-                  << " Layer 1 spheres hit (selective)" << std::endl;
-    } else {
-        std::cout << "  → No Layer 1 collisions detected" << std::endl;
-    }
-    
     return hit_indices;
 }
 
@@ -396,8 +369,6 @@ void CollisionDetectionEngine::execute_stage4_selective_layer0_collision(
     
     ScopedTimer timer(stage4_time_ms_);
     
-    std::cout << "🔍 Stage 4: Selective Layer 0 vertex loading..." << std::endl;
-    
     // SELECTIVE LOADING: Only load vertices for hit Layer 1 spheres
     layer_manager_->load_layer0_vertices(layer1_hits);
     
@@ -406,17 +377,8 @@ void CollisionDetectionEngine::execute_stage4_selective_layer0_collision(
     result.layer0_activations = static_cast<int>(loaded_vertex_groups.size());
     
     if (loaded_vertex_groups.empty()) {
-        std::cout << "  → No Layer 0 vertices loaded" << std::endl;
         return;
     }
-    
-    int total_vertices = 0;
-    for (const auto& vertex_group : loaded_vertex_groups) {
-        total_vertices += static_cast<int>(vertex_group.vertices.size());
-    }
-    
-    std::cout << "  Testing robot vs " << total_vertices 
-              << " loaded vertices (from " << loaded_vertex_groups.size() << " groups)..." << std::endl;
     
     // Test each vertex group against all robot capsules for precise collision
     for (const auto& vertex_group : loaded_vertex_groups) {
@@ -428,7 +390,7 @@ void CollisionDetectionEngine::execute_stage4_selective_layer0_collision(
         auto contacts = mesh_detector_->detect_multi_capsule_mesh_collision(
             robot_capsules, vertex_group.vertices, vertex_group.triangles);
         
-        // Log precise contacts found
+        // Log precise contacts found (KEPT - user likes detailed hit info)
         if (!contacts.empty()) {
             std::cout << "    ✓ PRECISE: Found " << contacts.size() 
                       << " contacts in vertex group (parent Layer1[" 
@@ -454,11 +416,6 @@ void CollisionDetectionEngine::execute_stage4_selective_layer0_collision(
     // Update collision flag if we found precise contacts
     if (!result.contacts.empty()) {
         result.has_collision = true;
-        std::cout << "  → " << result.contacts.size() 
-                  << " precise contacts found, max depth: " << std::fixed << std::setprecision(4)
-                  << result.max_penetration_depth << std::endl;
-    } else {
-        std::cout << "  → No precise contacts detected" << std::endl;
     }
 }
 

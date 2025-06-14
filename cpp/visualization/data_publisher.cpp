@@ -399,13 +399,14 @@ bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<
         return true;
     }
     
-    // CHANGED: Reduced batch size from 1000 to 500 vertices per packet
+    // OPTIMIZED: Reduced batch size from 1000 to 500 vertices per packet
     const size_t batch_size = 500;
     const size_t total_vertices = vertices.size();
     const uint32_t total_batches = static_cast<uint32_t>((total_vertices + batch_size - 1) / batch_size);
     
+    // OPTIMIZED: Only log summary, not per-batch details
     std::cout << "📦 Sending " << total_vertices << " vertices in " << total_batches 
-              << " batches of up to " << batch_size << " vertices each" << std::endl;
+              << " batches (frame " << frame_id << ")" << std::endl;
     
     for (uint32_t batch_idx = 0; batch_idx < total_batches; ++batch_idx) {
         HumanVerticesPacket vertices_packet;
@@ -425,12 +426,6 @@ bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<
             );
         }
         
-        // Calculate and log packet size for debugging
-        size_t packet_size = get_total_packet_size<HumanVerticesPacket>();
-        std::cout << "   Batch " << batch_idx << "/" << (total_batches-1) << ": " 
-                  << vertices_packet.vertex_count << " vertices, " 
-                  << packet_size << " bytes" << std::endl;
-        
         // Create packet header with provided frame ID (using HUMAN_POSE type with batch info)
         PacketHeader header = create_packet_header<HumanVerticesPacket>(
             PacketType::HUMAN_POSE, frame_id, get_current_timestamp_ms());
@@ -443,6 +438,8 @@ bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<
             std::cerr << "❌ Failed to send vertex batch " << batch_idx << "/" << total_batches << std::endl;
             return false;
         }
+        
+        // OPTIMIZED: No per-batch success logging
     }
     
     std::cout << "✅ All " << total_batches << " vertex batches sent successfully" << std::endl;
