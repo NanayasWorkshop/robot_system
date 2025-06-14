@@ -191,7 +191,7 @@ private:
         Eigen::Vector3d target;
         target.x() = orbit_center_.x() + orbit_radius_ * std::cos(angle);
         target.y() = orbit_center_.y() + orbit_radius_ * std::sin(angle);
-        target.z() = orbit_center_.z() + 20.0 * std::sin(angle * 2.0); // Slight vertical motion
+        target.z() = orbit_center_.z() + 20.0 * std::sin(angle * 6.0); // Slight vertical motion
         
         return target;
     }

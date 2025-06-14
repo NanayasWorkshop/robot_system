@@ -82,7 +82,7 @@ struct HumanVerticesPacket {
     uint32_t vertex_count;
     uint32_t batch_index;          // For splitting large vertex arrays
     uint32_t total_batches;
-    VertexData_Viz vertices[1000]; // Batch size
+    VertexData_Viz vertices[500];  // CHANGED: Reduced batch size from 1000 to 500
     
     HumanVerticesPacket() : vertex_count(0), batch_index(0), total_batches(0) {}
 };
