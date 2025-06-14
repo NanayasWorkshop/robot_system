@@ -6,6 +6,8 @@
 #include <iostream>
 #include <cstring>
 #include <cmath>
+#include <memory>
+#include <limits>
 
 namespace delta {
 
@@ -272,3 +274,171 @@ bool STARDaemonClient::send_data(const void* data, size_t size) {
 bool STARDaemonClient::receive_exact(void* buffer, size_t size) {
     size_t received = 0;
     char* buf = static_cast<char*>(buffer);
+    
+    while (received < size) {
+        ssize_t bytes = recv(socket_fd_, buf + received, size - received, 0);
+        if (bytes <= 0) {
+            log_error("receive", "Failed to receive data: " + std::string(strerror(errno)));
+            return false;
+        }
+        received += bytes;
+    }
+    return true;
+}
+
+bool STARDaemonClient::receive_data_with_header(void* buffer, size_t max_size, size_t& actual_size) {
+    // Receive size header
+    uint32_t data_size;
+    if (!receive_exact(&data_size, sizeof(data_size))) {
+        return false;
+    }
+    
+    if (data_size > max_size) {
+        log_error("receive header", "Data size exceeds buffer: " + std::to_string(data_size));
+        return false;
+    }
+    
+    // Receive actual data
+    if (!receive_exact(buffer, data_size)) {
+        return false;
+    }
+    
+    actual_size = data_size;
+    return true;
+}
+
+// =============================================================================
+// VALIDATION AND CONVERSION
+// =============================================================================
+
+bool STARDaemonClient::validate_pose_parameters(const std::vector<float>& pose_params) const {
+    if (pose_params.size() != POSE_PARAM_COUNT) {
+        return false;
+    }
+    
+    // Check for NaN or infinite values
+    for (float param : pose_params) {
+        if (!std::isfinite(param)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+std::vector<Eigen::Vector3d> STARDaemonClient::convert_float_array_to_vectors(const float* float_data, int count) const {
+    std::vector<Eigen::Vector3d> vectors;
+    vectors.reserve(count);
+    
+    for (int i = 0; i < count; ++i) {
+        int idx = i * 3;
+        vectors.emplace_back(
+            static_cast<double>(float_data[idx]),
+            static_cast<double>(float_data[idx + 1]),
+            static_cast<double>(float_data[idx + 2])
+        );
+    }
+    
+    return vectors;
+}
+
+void STARDaemonClient::update_statistics(bool success, double time_ms) const {
+    stats_.total_requests++;
+    stats_.total_request_time_ms += time_ms;
+    stats_.last_request_time_ms = time_ms;
+    
+    if (success) {
+        stats_.successful_requests++;
+    } else {
+        stats_.failed_requests++;
+    }
+}
+
+void STARDaemonClient::log_error(const std::string& operation, const std::string& error_msg) const {
+    std::cerr << "STARDaemonClient [" << operation << "]: " << error_msg << std::endl;
+}
+
+bool STARDaemonClient::set_socket_timeout(int timeout_ms) {
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+    
+    if (setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) == -1) {
+        return false;
+    }
+    
+    if (setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) == -1) {
+        return false;
+    }
+    
+    return true;
+}
+
+// =============================================================================
+// CONVENIENCE FUNCTIONS
+// =============================================================================
+
+std::unique_ptr<STARDaemonClient> create_star_client(const std::string& socket_path) {
+    auto client = std::make_unique<STARDaemonClient>();
+    
+    if (!client->connect(socket_path)) {
+        return nullptr;
+    }
+    
+    return client;
+}
+
+std::vector<float> generate_animated_pose_params(double time, double amplitude_scale) {
+    std::vector<float> pose_params(72, 0.0f);
+    
+    // Clamp amplitude scale
+    amplitude_scale = std::max(0.0, std::min(1.0, amplitude_scale));
+    
+    // Animation frequencies
+    const double arm_freq = 0.8;      // Arm swing frequency (Hz)
+    const double leg_freq = 0.6;      // Leg movement frequency (Hz)
+    const double spine_freq = 0.4;    // Spine movement frequency (Hz)
+    
+    // Animation amplitudes (scaled)
+    const double arm_amplitude = 0.15 * amplitude_scale;    // Max 15 degrees
+    const double leg_amplitude = 0.10 * amplitude_scale;    // Max 10 degrees  
+    const double spine_amplitude = 0.08 * amplitude_scale;  // Max 8 degrees
+    
+    // STAR joint indices (approximate - may need adjustment based on STAR model)
+    // These indices are estimates and may need to be verified with STAR documentation
+    
+    // Spine animation (joints 3, 6, 9 - spine1, spine2, spine3)
+    double spine_movement = spine_amplitude * std::sin(2.0 * M_PI * spine_freq * time);
+    pose_params[9] = static_cast<float>(spine_movement);   // spine1 X rotation
+    pose_params[18] = static_cast<float>(spine_movement * 0.8);  // spine2 X rotation
+    pose_params[27] = static_cast<float>(spine_movement * 0.6);  // spine3 X rotation
+    
+    // Left arm animation (shoulder, elbow - joints 16, 18)
+    double left_arm_offset = arm_amplitude * std::sin(2.0 * M_PI * arm_freq * time);
+    pose_params[48] = static_cast<float>(left_arm_offset);      // left_shoulder X rotation
+    pose_params[49] = static_cast<float>(left_arm_offset * 0.5); // left_shoulder Y rotation
+    pose_params[54] = static_cast<float>(-left_arm_offset * 0.8); // left_elbow X rotation (opposite)
+    
+    // Right arm animation (opposite phase)
+    double right_arm_offset = -arm_amplitude * std::sin(2.0 * M_PI * arm_freq * time);
+    pose_params[51] = static_cast<float>(right_arm_offset);      // right_shoulder X rotation
+    pose_params[52] = static_cast<float>(right_arm_offset * 0.5); // right_shoulder Y rotation
+    pose_params[57] = static_cast<float>(-right_arm_offset * 0.8); // right_elbow X rotation
+    
+    // Leg animation (subtle weight shift - hips, knees)
+    double leg_shift = leg_amplitude * std::sin(2.0 * M_PI * leg_freq * time * 0.7);
+    
+    // Left leg
+    pose_params[3] = static_cast<float>(-leg_shift * 0.5);  // left_hip X rotation
+    pose_params[4] = static_cast<float>(leg_shift * 0.3);   // left_hip Y rotation
+    pose_params[12] = static_cast<float>(leg_shift * 0.6);  // left_knee X rotation
+    
+    // Right leg (opposite)
+    pose_params[6] = static_cast<float>(leg_shift * 0.5);   // right_hip X rotation
+    pose_params[7] = static_cast<float>(-leg_shift * 0.3);  // right_hip Y rotation
+    pose_params[15] = static_cast<float>(-leg_shift * 0.6); // right_knee X rotation
+    
+    return pose_params;
+}
+
+} // namespace delta

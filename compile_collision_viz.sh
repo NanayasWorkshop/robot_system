@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Collision System + Visualization Build Script (Updated with STAR Vertex Support)
+# Collision System + Visualization Build Script (Updated with STAR Daemon Client)
 echo "=============================================================="
-echo "COLLISION SYSTEM + VISUALIZATION BUILD (WITH STAR VERTICES)"
+echo "COLLISION SYSTEM + VISUALIZATION BUILD (WITH STAR DAEMON)"
 echo "=============================================================="
 
 BASE_DIR="/home/yuuki/Documents/FABRIK_CPP/robot/delta_unit"
@@ -17,27 +17,6 @@ if ! pkg-config --exists hdf5; then echo "❌ HDF5 not found"; exit 1; fi
 if ! pkg-config --exists eigen3; then echo "❌ Eigen3 not found"; exit 1; fi
 if ! pkg-config --exists tbb; then echo "❌ TBB not found"; exit 1; fi
 echo "✅ All dependencies found"
-
-# Generate STAR vertices if needed
-echo "🔍 Checking STAR vertices..."
-if [ ! -f "star_vertices.bin" ]; then
-    echo "🔄 STAR vertices not found, generating..."
-    if [ ! -f "get_star_vertices.py" ]; then
-        echo "❌ get_star_vertices.py not found"; exit 1
-    fi
-    
-    echo "   Running Python script (this may take a few seconds)..."
-    if ! python3 get_star_vertices.py; then
-        echo "❌ Failed to generate STAR vertices"; exit 1
-    fi
-    
-    if [ ! -f "star_vertices.bin" ]; then
-        echo "❌ star_vertices.bin was not created"; exit 1
-    fi
-    echo "✅ STAR vertices generated successfully"
-else
-    echo "✅ STAR vertices found: star_vertices.bin"
-fi
 
 # Set compilation flags
 COMMON_FLAGS="-std=c++17 -Wall -Wextra -O2"
@@ -60,13 +39,13 @@ for file_pair in "${CORE_FILES[@]}"; do
     fi
 done
 
-# NEW: Vertex loader utilities
-echo "🔨 Compiling vertex loader utilities..."
-VERTEX_LOADER_FILES=(
-    "cpp/utils/vertex_loader.cpp:build/vertex_loader.o"
+# NEW: STAR Daemon Client utilities
+echo "🔨 Compiling STAR daemon client..."
+STAR_CLIENT_FILES=(
+    "cpp/utils/star_daemon_client.cpp:build/star_daemon_client.o"
 )
 
-for file_pair in "${VERTEX_LOADER_FILES[@]}"; do
+for file_pair in "${STAR_CLIENT_FILES[@]}"; do
     IFS=':' read -r source target <<< "$file_pair"
     if [ -f "$source" ]; then
         if ! g++ $COMMON_FLAGS $INCLUDE_FLAGS -c "$source" -o "$target"; then
@@ -114,49 +93,59 @@ fi
 
 # Test programs
 echo "🔨 Compiling tests..."
-# UPDATED: Include vertex loader in object list
-ALL_OBJECTS="build/layer_manager.o build/mesh_collision.o build/collision_detection_engine.o build/capsule_creation_block.o build/robot_collision_bridge.o build/star_collision_bridge.o build/network_sender.o build/data_publisher.o build/vertex_loader.o $FABRIK_OBJECTS"
+# UPDATED: Include STAR daemon client in object list (removed vertex_loader)
+ALL_OBJECTS="build/layer_manager.o build/mesh_collision.o build/collision_detection_engine.o build/capsule_creation_block.o build/robot_collision_bridge.o build/star_collision_bridge.o build/network_sender.o build/data_publisher.o build/star_daemon_client.o $FABRIK_OBJECTS"
 
 # Receiver (standalone)
 if ! g++ $COMMON_FLAGS $INCLUDE_FLAGS tests/test_visualization_receiver.cpp -o build/test_visualization_receiver; then
     echo "❌ receiver failed"; exit 1
 fi
 
-# Moving target test (real system with STAR vertices)
+# Moving target test (real system with STAR daemon)
 if ! g++ $COMMON_FLAGS $INCLUDE_FLAGS tests/test_moving_target.cpp $ALL_OBJECTS $LINK_FLAGS -o build/test_moving_target; then
     echo "❌ moving target failed"; exit 1
 fi
 
-# Verify STAR vertices are accessible
-echo "🔍 Verifying STAR vertex setup..."
-if [ -f "star_vertices.bin" ]; then
-    VERTEX_SIZE=$(stat -f%z "star_vertices.bin" 2>/dev/null || stat -c%s "star_vertices.bin" 2>/dev/null)
-    if [ "$VERTEX_SIZE" -gt 100000 ]; then  # Should be ~165KB for 6890 vertices
-        echo "✅ STAR vertices ready (${VERTEX_SIZE} bytes)"
+# NEW: STAR daemon client test
+if ! g++ $COMMON_FLAGS $INCLUDE_FLAGS tests/test_star_daemon_client.cpp build/star_daemon_client.o $LINK_FLAGS -o build/test_star_daemon_client; then
+    echo "❌ STAR daemon client test failed"; exit 1
+fi
+
+# Verify STAR daemon availability
+echo "🔍 Verifying STAR daemon setup..."
+if [ -f "python/star_daemon.py" ]; then
+    echo "✅ STAR daemon script found: python/star_daemon.py"
+    
+    # Check if daemon is running
+    if [ -S "/tmp/star_daemon.sock" ]; then
+        echo "✅ STAR daemon appears to be running"
     else
-        echo "⚠️  STAR vertex file seems small (${VERTEX_SIZE} bytes)"
+        echo "⚠️  STAR daemon not running (socket not found)"
+        echo "   Start with: python3 python/star_daemon.py"
     fi
 else
-    echo "⚠️  STAR vertex file missing after build"
+    echo "⚠️  STAR daemon script not found"
 fi
 
 echo ""
 echo "=============================================================="
-echo "✅ BUILD COMPLETE (WITH STAR VERTEX SUPPORT)"
+echo "✅ BUILD COMPLETE (WITH STAR DAEMON INTEGRATION)"
 echo "=============================================================="
-echo "📁 Generated Files:"
-echo "  ./star_vertices.bin                  - STAR T-pose vertices (binary)"
-echo "  ./star_vertices.txt                  - STAR T-pose vertices (text)"
-echo ""
 echo "📁 Executables:"
-echo "  ./build/test_visualization_receiver  - UDP receiver"
-echo "  ./build/test_moving_target           - Real collision system test (with STAR)"
+echo "  ./build/test_visualization_receiver     - UDP receiver"
+echo "  ./build/test_moving_target              - Real collision system test (with STAR daemon)"
+echo "  ./build/test_star_daemon_client         - STAR daemon client test"
 echo ""
 echo "🚀 Usage:"
-echo "  Terminal 1: ./build/test_visualization_receiver"
-echo "  Terminal 2: ./build/test_moving_target"
+echo "  1. Start STAR daemon:    python3 python/star_daemon.py"
+echo "  2. Start visualizer:     ./build/test_visualization_receiver"
+echo "  3. Run collision test:   ./build/test_moving_target"
+echo ""
+echo "🧪 Testing:"
+echo "  Test daemon alone:       python3 python/test_star_daemon.py"
+echo "  Test C++ client:         ./build/test_star_daemon_client"
 echo ""
 echo "📊 STAR Integration:"
-echo "  ✅ Real 6890 STAR vertices available"
-echo "  ✅ Vertex loader utilities compiled"
-echo "  ✅ Collision system ready for real mesh data"
+echo "  ✅ Real-time mesh deformation via daemon"
+echo "  ✅ C++ client utilities compiled"
+echo "  ✅ Low-latency IPC communication ready"
