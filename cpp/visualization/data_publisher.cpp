@@ -269,7 +269,11 @@ CollisionLayersPacket DataPublisher::convert_layer_states(const LayerStates& lay
     std::cout << "\n=== DATA PUBLISHER CONVERT_LAYER_STATES DEBUG ===" << std::endl;
     std::cout << "Layer 3 primitives count: " << layer_states.layer3_primitives.size() << std::endl;
     std::cout << "DEBUG: sizeof(Layer3Data_Viz) = " << sizeof(Layer3Data_Viz) << " bytes" << std::endl;
+    std::cout << "DEBUG: sizeof(Layer2Data_Viz) = " << sizeof(Layer2Data_Viz) << " bytes" << std::endl;
+    std::cout << "DEBUG: sizeof(Layer1Data_Viz) = " << sizeof(Layer1Data_Viz) << " bytes" << std::endl;
     std::cout << "DEBUG: sizeof(CollisionLayersPacket) = " << sizeof(CollisionLayersPacket) << " bytes" << std::endl;
+    std::cout << "DEBUG: offsetof(CollisionLayersPacket, layer2_count) = " << offsetof(CollisionLayersPacket, layer2_count) << std::endl;
+    std::cout << "DEBUG: offsetof(CollisionLayersPacket, layer1_count) = " << offsetof(CollisionLayersPacket, layer1_count) << std::endl;
     
     if (!layer_states.layer3_primitives.empty()) {
         const auto& first = layer_states.layer3_primitives[0];

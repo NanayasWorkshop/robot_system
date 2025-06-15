@@ -48,7 +48,7 @@ private:
     const double robot_radius_ = 24.8; // From constants
     
     // Robot positioning in STAR coordinate space (meters)
-    const Eigen::Vector3d robot_offset_{0.3, -1.2, 0.0}; // X=0.5m right, Y=0.0m, Z=0.3m forward
+    const Eigen::Vector3d robot_offset_{0.0, -1.2, 0.0}; // X=0.5m right, Y=0.0m, Z=0.3m forward
     
 public:
     MovingTargetTest() : frame_count_(0), animation_time_(0.0) {}
