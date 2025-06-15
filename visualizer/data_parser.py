@@ -2,14 +2,29 @@
 """
 Data Parser - Pure C++ collision data display
 Clean rewrite: All features, no coordinate transformation baggage
+UPDATED: Fixed joint visualization with proper coordinates, colors, and skeleton
+NO TRANSFORMATION NEEDED - joints already in STAR coordinates
 """
 
 import struct
 import numpy as np
 import open3d as o3d
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 from network_receiver import PacketType, PacketBuffer
+
+# Import STAR body definitions for skeleton
+try:
+    import sys
+    import os
+    # Add the parent directory to path to find python module
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    from python.star_body_system.core.body_definitions import BodyDefinitions
+    print("✅ BodyDefinitions imported successfully")
+except ImportError as e:
+    print(f"⚠️  Warning: Could not import BodyDefinitions ({e}), skeleton lines disabled")
+    BodyDefinitions = None
 
 
 @dataclass
@@ -51,7 +66,10 @@ class DataParser:
     def __init__(self):
         # Colors
         self.ROBOT_COLOR = np.array([0.27, 0.51, 0.71])      # Steel blue
-        self.HUMAN_COLOR = np.array([0.96, 0.87, 0.70])      # Warm beige
+        self.HUMAN_COLOR = np.array([0.96, 0.87, 0.70])      # Warm beige (vertices)
+        self.JOINT_COLOR = np.array([1.0, 0.2, 0.2])        # Bright red (joints)
+        self.BONE_COLOR = np.array([0.8, 0.8, 0.2])         # Yellow-green (skeleton)
+        
         self.COLLISION_COLORS = {
             'low': np.array([0.0, 0.8, 0.0]),      # Green
             'med': np.array([1.0, 1.0, 0.0]),      # Yellow
@@ -63,9 +81,59 @@ class DataParser:
         self.CAPSULE_POINTS = 25
         self.CIRCLE_POINTS = 8
         
+        # Joint sizing
+        self.JOINT_SPHERE_RADIUS = 0.01  # 1cm sphere radius for joints
+        
         # Vertex batching
         self.vertex_accumulators: Dict[int, VertexBatchAccumulator] = {}
         self.max_cached_frames = 5
+    
+    def create_joint_spheres(self, joint_positions: np.ndarray) -> o3d.geometry.TriangleMesh:
+        """Create sphere meshes for joints"""
+        if len(joint_positions) == 0:
+            return o3d.geometry.TriangleMesh()
+        
+        # Create combined mesh for all joints
+        combined_mesh = o3d.geometry.TriangleMesh()
+        
+        for joint_pos in joint_positions:
+            # Create sphere at joint position
+            sphere = o3d.geometry.TriangleMesh.create_sphere(
+                radius=self.JOINT_SPHERE_RADIUS,
+                resolution=10
+            )
+            sphere.translate(joint_pos)
+            sphere.paint_uniform_color(self.JOINT_COLOR)
+            
+            # Add to combined mesh
+            combined_mesh += sphere
+        
+        return combined_mesh
+    
+    def create_skeleton_lines(self, joint_positions: np.ndarray) -> Optional[o3d.geometry.LineSet]:
+        """Create skeleton line connections between joints"""
+        if BodyDefinitions is None or len(joint_positions) != 24:
+            return None
+        
+        lines = []
+        colors = []
+        
+        # Use DETAILED_BONES for 24 bone connections
+        for joint1_idx, joint2_idx, bone_name in BodyDefinitions.DETAILED_BONES:
+            if joint1_idx < len(joint_positions) and joint2_idx < len(joint_positions):
+                lines.append([joint1_idx, joint2_idx])
+                colors.append(self.BONE_COLOR)
+        
+        if not lines:
+            return None
+        
+        # Create LineSet
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(joint_positions)
+        line_set.lines = o3d.utility.Vector2iVector(lines)
+        line_set.colors = o3d.utility.Vector3dVector(colors)
+        
+        return line_set
     
     def sample_capsule_points(self, capsule: CapsuleData, num_points: int) -> np.ndarray:
         """Generate points on capsule surface"""
@@ -114,6 +182,26 @@ class DataParser:
             points.append(capsule.end + offset)
         
         return np.array(points) if points else np.array([capsule.start])
+    
+    def sample_sphere_points(self, center: np.ndarray, radius: float, num_points: int) -> np.ndarray:
+        """Generate points on sphere surface"""
+        points = []
+        
+        # Use spherical coordinates to generate points uniformly on sphere
+        for i in range(num_points):
+            # Uniform distribution on sphere using golden ratio
+            theta = 2 * np.pi * i / num_points
+            phi = np.arccos(1 - 2 * (i + 0.5) / num_points)
+            
+            # Convert to Cartesian coordinates
+            x = radius * np.sin(phi) * np.cos(theta)
+            y = radius * np.sin(phi) * np.sin(theta)
+            z = radius * np.cos(phi)
+            
+            point = center + np.array([x, y, z])
+            points.append(point)
+        
+        return np.array(points) if points else np.array([center])
     
     def get_collision_color(self, depth: float) -> np.ndarray:
         """Color based on penetration depth"""
@@ -171,19 +259,19 @@ class DataParser:
         except Exception:
             return None
     
-    def parse_human_pose(self, data: bytes) -> Optional[o3d.geometry.PointCloud]:
-        """Parse human joint data"""
+    def parse_human_pose(self, data: bytes) -> Tuple[Optional[o3d.geometry.TriangleMesh], Optional[o3d.geometry.LineSet]]:
+        """Parse human joint data and return joint spheres + skeleton lines"""
         try:
             if len(data) < 4:
-                return None
+                return None, None
             
             count = struct.unpack('I', data[:4])[0]
             if count == 0:
-                return None
+                return None, None
             
             joints = []
             offset = 4
-            for _ in range(min(count, 24)):
+            for _ in range(min(count, 24)):  # STAR has 24 joints
                 if offset + 12 > len(data):
                     break
                 
@@ -193,18 +281,23 @@ class DataParser:
                 offset += 12
             
             if not joints:
-                return None
+                return None, None
             
-            # Create point cloud
-            pc = o3d.geometry.PointCloud()
-            pc.points = o3d.utility.Vector3dVector(np.array(joints))
-            colors = np.tile(self.HUMAN_COLOR, (len(joints), 1))
-            pc.colors = o3d.utility.Vector3dVector(colors)
+            joint_positions = np.array(joints)
             
-            return pc
+            # No transformation needed - joints already in STAR coordinates!
             
-        except Exception:
-            return None
+            # Create joint spheres
+            joint_spheres = self.create_joint_spheres(joint_positions)
+            
+            # Create skeleton lines
+            skeleton_lines = self.create_skeleton_lines(joint_positions)
+            
+            return joint_spheres, skeleton_lines
+            
+        except Exception as e:
+            print(f"⚠️  Error parsing joints: {e}")
+            return None, None
     
     def parse_human_vertices_batch(self, data: bytes, frame_id: int) -> Optional[int]:
         """Parse human vertex batch"""
@@ -288,6 +381,130 @@ class DataParser:
         for frame_id in frames_to_remove:
             del self.vertex_accumulators[frame_id]
     
+    def parse_collision_layers(self, data: bytes) -> Dict[str, o3d.geometry.PointCloud]:
+        """Parse collision layer data (Layer 3, Layer 2, Layer 1)"""
+        try:
+            layer_geometries = {}
+            offset = 0
+            
+            # Parse Layer 3 count
+            if offset + 4 > len(data):
+                return {}
+            
+            layer3_count = struct.unpack('I', data[offset:offset+4])[0]
+            offset += 4
+            
+            # Parse Layer 3 primitives (capsules)
+            layer3_points = []
+            layer3_colors = []
+            for i in range(min(layer3_count, 16)):  # Max 16 from C++
+                if offset + 29 > len(data):  # 7 floats + 1 byte
+                    break
+                
+                values = struct.unpack('fffffffB', data[offset:offset+29])
+                start = np.array([values[0], values[1], values[2]])
+                end = np.array([values[3], values[4], values[5]])
+                radius = values[6]
+                is_active = values[7]
+                
+                # Create capsule points
+                if radius > 0:
+                    capsule = CapsuleData(start, end, radius)
+                    points = self.sample_capsule_points(capsule, 50)  # Increased from 15 to 50
+                    layer3_points.extend(points)
+                    
+                    # Color based on activity
+                    color = np.array([0.0, 1.0, 0.0]) if is_active else np.array([0.5, 0.5, 0.5])
+                    colors = np.tile(color, (len(points), 1))
+                    layer3_colors.extend(colors)
+                
+                offset += 29
+            
+            if layer3_points:
+                pc = o3d.geometry.PointCloud()
+                pc.points = o3d.utility.Vector3dVector(np.array(layer3_points))
+                pc.colors = o3d.utility.Vector3dVector(np.array(layer3_colors))
+                layer_geometries['layer3'] = pc
+            
+            # Parse Layer 2 count
+            if offset + 4 > len(data):
+                return layer_geometries
+            
+            layer2_count = struct.unpack('I', data[offset:offset+4])[0]
+            offset += 4
+            
+            # Parse Layer 2 primitives (capsules)
+            layer2_points = []
+            layer2_colors = []
+            for i in range(min(layer2_count, 32)):  # Max 32 from C++
+                if offset + 29 > len(data):
+                    break
+                
+                values = struct.unpack('fffffffB', data[offset:offset+29])
+                start = np.array([values[0], values[1], values[2]])
+                end = np.array([values[3], values[4], values[5]])
+                radius = values[6]
+                is_active = values[7]
+                
+                if radius > 0:
+                    capsule = CapsuleData(start, end, radius)
+                    points = self.sample_capsule_points(capsule, 40)  # Increased from 10 to 40
+                    layer2_points.extend(points)
+                    
+                    color = np.array([0.0, 0.0, 1.0]) if is_active else np.array([0.3, 0.3, 0.3])
+                    colors = np.tile(color, (len(points), 1))
+                    layer2_colors.extend(colors)
+                
+                offset += 29
+            
+            if layer2_points:
+                pc = o3d.geometry.PointCloud()
+                pc.points = o3d.utility.Vector3dVector(np.array(layer2_points))
+                pc.colors = o3d.utility.Vector3dVector(np.array(layer2_colors))
+                layer_geometries['layer2'] = pc
+            
+            # Parse Layer 1 count
+            if offset + 4 > len(data):
+                return layer_geometries
+            
+            layer1_count = struct.unpack('I', data[offset:offset+4])[0]
+            offset += 4
+            
+            # Parse Layer 1 primitives (spheres)
+            layer1_points = []
+            layer1_colors = []
+            for i in range(min(layer1_count, 128)):  # Max 128 from C++
+                if offset + 17 > len(data):  # 4 floats + 1 byte
+                    break
+                
+                values = struct.unpack('ffffB', data[offset:offset+17])
+                center = np.array([values[0], values[1], values[2]])
+                radius = values[3]
+                is_active = values[4]
+                
+                if radius > 0:
+                    # Create sphere points (many points on sphere surface)
+                    sphere_points = self.sample_sphere_points(center, radius, 30)  # 30 points per sphere
+                    layer1_points.extend(sphere_points)
+                    
+                    color = np.array([1.0, 0.0, 1.0]) if is_active else np.array([0.2, 0.2, 0.2])
+                    colors = np.tile(color, (len(sphere_points), 1))
+                    layer1_colors.extend(colors)
+                
+                offset += 17
+            
+            if layer1_points:
+                pc = o3d.geometry.PointCloud()
+                pc.points = o3d.utility.Vector3dVector(np.array(layer1_points))
+                pc.colors = o3d.utility.Vector3dVector(np.array(layer1_colors))
+                layer_geometries['layer1'] = pc
+            
+            return layer_geometries
+            
+        except Exception as e:
+            print(f"⚠️  Error parsing collision layers: {e}")
+            return {}
+    
     def parse_collision_contacts(self, data: bytes) -> Optional[o3d.geometry.PointCloud]:
         """Parse collision contact data"""
         try:
@@ -336,10 +553,19 @@ class DataParser:
         # Human data
         human_packets = get_packets(PacketType.HUMAN_POSE)
         if human_packets:
-            # Separate joints and vertices
-            joint_packets = [p for p in human_packets if len(p) <= 200]
-            vertex_packets = [p for p in human_packets if len(p) > 200]
+            # Separate joints and vertices by size - joints are ~296 bytes, vertices are ~6012 bytes
+            joint_packets = [p for p in human_packets if len(p) < 1000]  # Changed threshold
+            vertex_packets = [p for p in human_packets if len(p) >= 1000]
             
+            # Process joints first (smaller packets)
+            if joint_packets:
+                joint_spheres, skeleton_lines = self.parse_human_pose(joint_packets[-1])
+                if joint_spheres:
+                    geometries['joints'] = joint_spheres
+                if skeleton_lines:
+                    geometries['skeleton'] = skeleton_lines
+            
+            # Process vertices (larger packets)
             if vertex_packets:
                 # Process vertex batches
                 for vertex_data in vertex_packets:
@@ -364,12 +590,6 @@ class DataParser:
                                 colors = np.tile(self.HUMAN_COLOR, (len(partial_vertices), 1))
                                 pc.colors = o3d.utility.Vector3dVector(colors)
                                 geometries['human'] = pc
-            
-            elif joint_packets:
-                # Joint-only visualization
-                human_pc = self.parse_human_pose(joint_packets[-1])
-                if human_pc:
-                    geometries['human'] = human_pc
         
         # Collision contacts
         collision_packets = get_packets(PacketType.COLLISION_CONTACTS)
@@ -378,12 +598,19 @@ class DataParser:
             if collision_pc:
                 geometries['collision'] = collision_pc
         
+        # Collision layers (NEW)
+        layer_packets = get_packets(PacketType.COLLISION_LAYERS)
+        if layer_packets and len(layer_packets[-1]) > 100:
+            layer_geometries = self.parse_collision_layers(layer_packets[-1])
+            for layer_name, layer_geom in layer_geometries.items():
+                geometries[layer_name] = layer_geom
+        
         return geometries
 
 
 # Test
 if __name__ == "__main__":
-    print("🧪 Testing DataParser (Clean Version)")
+    print("🧪 Testing DataParser (Clean Version - No Transform)")
     
     parser = DataParser()
     
@@ -396,4 +623,13 @@ if __name__ == "__main__":
     points = parser.sample_capsule_points(capsule, 25)
     print(f"Generated {len(points)} capsule points")
     
-    print("✅ Tests complete")
+    # Test skeleton creation
+    if BodyDefinitions:
+        fake_joints = np.random.rand(24, 3)
+        skeleton = parser.create_skeleton_lines(fake_joints)
+        if skeleton:
+            print(f"Created skeleton with {len(skeleton.lines)} bones")
+        else:
+            print("Failed to create skeleton")
+    
+    print("✅ Tests complete - No coordinate transformation needed!")

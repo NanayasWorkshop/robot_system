@@ -2,12 +2,13 @@
 """
 Open3D Collision Visualizer
 Clean rewrite: STAR-native (Y-up, meters), minimal logging, pure C++ data display
+UPDATED: Support for joint spheres, skeleton lines, and collision layers
 """
 
 import argparse
 import time
 import sys
-from typing import Dict
+from typing import Dict, Union
 import numpy as np
 import open3d as o3d
 from dataclasses import dataclass
@@ -21,7 +22,12 @@ class VisualizerConfig:
     """Visualizer configuration"""
     show_robot: bool = True
     show_human: bool = True
+    show_joints: bool = True
+    show_skeleton: bool = True
     show_collision: bool = True
+    show_layer1: bool = True
+    show_layer2: bool = True
+    show_layer3: bool = True
     window_width: int = 1200
     window_height: int = 800
     target_fps: int = 60
@@ -41,7 +47,8 @@ class CollisionVisualizer:
         # Open3D
         self.vis = None
         self.geometries = {}
-        self.geometry_names = ['robot', 'human', 'collision']
+        # Updated geometry names to include collision layers
+        self.geometry_names = ['robot', 'human', 'joints', 'skeleton', 'collision', 'layer1', 'layer2', 'layer3']
         
         # State
         self.is_running = False
@@ -51,11 +58,14 @@ class CollisionVisualizer:
         # Stats
         self.frame_count = 0
         self.mesh_count = 0
+        self.joint_frame_count = 0
+        self.skeleton_frame_count = 0
+        self.layer_frame_count = 0
         self.last_stats_time = time.time()
     
     def initialize(self) -> bool:
         """Initialize all components"""
-        print("🚀 Initializing Collision Visualizer (STAR-native)")
+        print("🚀 Initializing Collision Visualizer (STAR-native with Joints & Layers)")
         
         # Network
         if not self.receiver.initialize():
@@ -79,7 +89,7 @@ class CollisionVisualizer:
         try:
             self.vis = o3d.visualization.Visualizer()
             self.vis.create_window(
-                window_name="Robot Collision Visualization - STAR Native (Y-up)",
+                window_name="Robot Collision Visualization - STAR Native + Joints + Layers",
                 width=self.config.window_width,
                 height=self.config.window_height
             )
@@ -115,16 +125,31 @@ class CollisionVisualizer:
         # Empty geometries for data
         for name in self.geometry_names:
             if self._should_show(name):
-                pc = o3d.geometry.PointCloud()
-                self.geometries[name] = pc
-                self.vis.add_geometry(pc)
+                # Different geometry types based on name
+                if name in ['joints']:
+                    # Joints will be TriangleMesh (spheres)
+                    geometry = o3d.geometry.TriangleMesh()
+                elif name in ['skeleton']:
+                    # Skeleton will be LineSet
+                    geometry = o3d.geometry.LineSet()
+                else:
+                    # Default to PointCloud for robot, human, collision, layers
+                    geometry = o3d.geometry.PointCloud()
+                
+                self.geometries[name] = geometry
+                self.vis.add_geometry(geometry)
     
     def _should_show(self, name: str) -> bool:
         """Check if geometry should be shown"""
         return {
             'robot': self.config.show_robot,
             'human': self.config.show_human,
-            'collision': self.config.show_collision
+            'joints': self.config.show_joints,
+            'skeleton': self.config.show_skeleton,
+            'collision': self.config.show_collision,
+            'layer1': self.config.show_layer1,
+            'layer2': self.config.show_layer2,
+            'layer3': self.config.show_layer3,
         }.get(name, False)
     
     def _get_enabled_features(self) -> str:
@@ -134,8 +159,18 @@ class CollisionVisualizer:
             features.append("Robot")
         if self.config.show_human:
             features.append("Human")
+        if self.config.show_joints:
+            features.append("Joints")
+        if self.config.show_skeleton:
+            features.append("Skeleton")
         if self.config.show_collision:
             features.append("Collision")
+        if self.config.show_layer1:
+            features.append("Layer1")
+        if self.config.show_layer2:
+            features.append("Layer2")
+        if self.config.show_layer3:
+            features.append("Layer3")
         return ", ".join(features)
     
     def run(self):
@@ -189,17 +224,30 @@ class CollisionVisualizer:
             
             # Update geometries
             frame_complete = False
+            joints_updated = False
+            skeleton_updated = False
+            layers_updated = False
+            
             for name in self.geometry_names:
                 if name in geometries and self._should_show(name):
                     self._update_geometry(name, geometries[name])
                     
-                    # Track complete human meshes
+                    # Track specific geometry types
                     if name == 'human' and len(geometries[name].points) > 1000:
                         self.mesh_count += 1
                         frame_complete = True
+                    elif name == 'joints':
+                        self.joint_frame_count += 1
+                        joints_updated = True
+                    elif name == 'skeleton':
+                        self.skeleton_frame_count += 1
+                        skeleton_updated = True
+                    elif name in ['layer1', 'layer2', 'layer3']:
+                        self.layer_frame_count += 1
+                        layers_updated = True
             
-            # Mark frame as processed
-            if frame_complete:
+            # Mark frame as processed if we got significant data
+            if frame_complete or joints_updated or skeleton_updated or layers_updated:
                 self.processed_frames.add(frame.frame_id)
                 self._cleanup_processed_frames(frame.frame_id)
             
@@ -210,15 +258,48 @@ class CollisionVisualizer:
             if self.frame_count % 100 == 0:
                 print(f"⚠️  Frame error: {e}")
     
-    def _update_geometry(self, name: str, new_geometry: o3d.geometry.PointCloud):
-        """Update geometry with new data"""
+    def _update_geometry(self, name: str, new_geometry: Union[o3d.geometry.PointCloud, o3d.geometry.TriangleMesh, o3d.geometry.LineSet]):
+        """Update geometry with new data (handles different geometry types)"""
         try:
             old_geometry = self.geometries[name]
-            old_geometry.points = new_geometry.points
-            old_geometry.colors = new_geometry.colors
+            
+            if isinstance(new_geometry, o3d.geometry.PointCloud) and isinstance(old_geometry, o3d.geometry.PointCloud):
+                # PointCloud update (robot, human, collision, layers)
+                old_geometry.points = new_geometry.points
+                old_geometry.colors = new_geometry.colors
+                
+            elif isinstance(new_geometry, o3d.geometry.TriangleMesh) and isinstance(old_geometry, o3d.geometry.TriangleMesh):
+                # TriangleMesh update (joints)
+                old_geometry.vertices = new_geometry.vertices
+                old_geometry.triangles = new_geometry.triangles
+                old_geometry.vertex_colors = new_geometry.vertex_colors
+                old_geometry.compute_vertex_normals()
+                
+            elif isinstance(new_geometry, o3d.geometry.LineSet) and isinstance(old_geometry, o3d.geometry.LineSet):
+                # LineSet update (skeleton)
+                old_geometry.points = new_geometry.points
+                old_geometry.lines = new_geometry.lines
+                old_geometry.colors = new_geometry.colors
+                
+            else:
+                # Type mismatch - replace geometry entirely
+                self.vis.remove_geometry(old_geometry)
+                self.geometries[name] = new_geometry
+                self.vis.add_geometry(new_geometry)
+                return
+            
+            # Update the existing geometry
             self.vis.update_geometry(old_geometry)
-        except Exception:
-            pass  # Silent fail for geometry updates
+            
+        except Exception as e:
+            # Silent fail for geometry updates, but try to replace on error
+            try:
+                if name in self.geometries:
+                    self.vis.remove_geometry(self.geometries[name])
+                self.geometries[name] = new_geometry
+                self.vis.add_geometry(new_geometry)
+            except:
+                pass  # Final fallback - silent fail
     
     def _cleanup_processed_frames(self, current_frame_id: int):
         """Clean up old processed frame IDs"""
@@ -233,6 +314,9 @@ class CollisionVisualizer:
             
             print(f"\r📊 Frames: {self.frame_count} | "
                   f"Meshes: {self.mesh_count} | "
+                  f"Joints: {self.joint_frame_count} | "
+                  f"Skeletons: {self.skeleton_frame_count} | "
+                  f"Layers: {self.layer_frame_count} | "
                   f"Net: {net_stats.frames_complete} | "
                   f"Loss: {net_stats.frames_dropped} | "
                   f"Data: {net_stats.data_rate_mbps:.1f}Mbps",
@@ -259,21 +343,25 @@ class CollisionVisualizer:
         if self.vis:
             self.vis.destroy_window()
         
-        print(f"📊 Final: {self.frame_count} frames, {self.mesh_count} complete meshes")
+        print(f"📊 Final: {self.frame_count} frames, {self.mesh_count} meshes, "
+              f"{self.joint_frame_count} joint frames, {self.skeleton_frame_count} skeleton frames, "
+              f"{self.layer_frame_count} layer updates")
         print("✅ Shutdown complete")
 
 
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description="Robot Collision Visualizer - STAR Native",
+        description="Robot Collision Visualizer - STAR Native with Joints & Layers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python visualizer.py                    # Default: all features
-  python visualizer.py --robot --human   # Robot and human only
-  python visualizer.py --collision       # Collision only
-  python visualizer.py --point-size 4.0  # Larger points
+  python visualizer.py                       # Default: all features
+  python visualizer.py --robot --human      # Robot and human only
+  python visualizer.py --joints --skeleton  # Joints and skeleton only
+  python visualizer.py --layer1 --layer2    # Only collision layers 1&2
+  python visualizer.py --no-skeleton        # All except skeleton lines
+  python visualizer.py --point-size 4.0     # Larger points
         """
     )
     
@@ -281,11 +369,39 @@ Examples:
     parser.add_argument('--robot', action='store_true', 
                        help='Show robot capsules')
     parser.add_argument('--human', action='store_true',
-                       help='Show human mesh/joints')
+                       help='Show human mesh/vertices')
+    parser.add_argument('--joints', action='store_true',
+                       help='Show joint spheres')
+    parser.add_argument('--skeleton', action='store_true',
+                       help='Show skeleton lines')
     parser.add_argument('--collision', action='store_true',
                        help='Show collision contacts')
+    parser.add_argument('--layer1', action='store_true',
+                       help='Show Layer 1 collision spheres')
+    parser.add_argument('--layer2', action='store_true',
+                       help='Show Layer 2 collision capsules')
+    parser.add_argument('--layer3', action='store_true',
+                       help='Show Layer 3 collision capsules')
     parser.add_argument('--all', action='store_true',
                        help='Show all features')
+    
+    # Disable features
+    parser.add_argument('--no-robot', action='store_true',
+                       help='Hide robot capsules')
+    parser.add_argument('--no-human', action='store_true',
+                       help='Hide human mesh/vertices')
+    parser.add_argument('--no-joints', action='store_true',
+                       help='Hide joint spheres')
+    parser.add_argument('--no-skeleton', action='store_true',
+                       help='Hide skeleton lines')
+    parser.add_argument('--no-collision', action='store_true',
+                       help='Hide collision contacts')
+    parser.add_argument('--no-layer1', action='store_true',
+                       help='Hide Layer 1 collision spheres')
+    parser.add_argument('--no-layer2', action='store_true',
+                       help='Hide Layer 2 collision capsules')
+    parser.add_argument('--no-layer3', action='store_true',
+                       help='Hide Layer 3 collision capsules')
     
     # Display
     parser.add_argument('--width', type=int, default=1200,
@@ -303,19 +419,53 @@ Examples:
 def create_config(args) -> VisualizerConfig:
     """Create config from arguments"""
     # Default: show all if no specific flags
-    if not any([args.robot, args.human, args.collision, args.all]):
+    if not any([args.robot, args.human, args.joints, args.skeleton, args.collision, 
+                args.layer1, args.layer2, args.layer3, args.all]):
         show_robot = True
         show_human = True
+        show_joints = True
+        show_skeleton = True
         show_collision = True
+        show_layer1 = True
+        show_layer2 = True
+        show_layer3 = True
     else:
         show_robot = args.robot or args.all
         show_human = args.human or args.all
+        show_joints = args.joints or args.all
+        show_skeleton = args.skeleton or args.all
         show_collision = args.collision or args.all
+        show_layer1 = args.layer1 or args.all
+        show_layer2 = args.layer2 or args.all
+        show_layer3 = args.layer3 or args.all
+    
+    # Apply disable flags
+    if args.no_robot:
+        show_robot = False
+    if args.no_human:
+        show_human = False
+    if args.no_joints:
+        show_joints = False
+    if args.no_skeleton:
+        show_skeleton = False
+    if args.no_collision:
+        show_collision = False
+    if args.no_layer1:
+        show_layer1 = False
+    if args.no_layer2:
+        show_layer2 = False
+    if args.no_layer3:
+        show_layer3 = False
     
     return VisualizerConfig(
         show_robot=show_robot,
         show_human=show_human,
+        show_joints=show_joints,
+        show_skeleton=show_skeleton,
         show_collision=show_collision,
+        show_layer1=show_layer1,
+        show_layer2=show_layer2,
+        show_layer3=show_layer3,
         window_width=args.width,
         window_height=args.height,
         target_fps=args.fps,
@@ -325,11 +475,12 @@ def create_config(args) -> VisualizerConfig:
 
 def main():
     """Main entry point"""
-    print("🎯 ROBOT COLLISION VISUALIZER - STAR NATIVE")
-    print("=" * 50)
+    print("🎯 ROBOT COLLISION VISUALIZER - STAR NATIVE + JOINTS + LAYERS")
+    print("=" * 65)
     print("Pure C++ data display - Y-up coordinates, meters")
+    print("Features: Robot, Human mesh, Joint spheres, Skeleton lines, Collision layers")
     print("Minimal logging - Clean, production-ready")
-    print("=" * 50)
+    print("=" * 65)
     
     # Parse arguments
     args = parse_arguments()
