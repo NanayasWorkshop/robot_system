@@ -263,6 +263,23 @@ CollisionContactsPacket DataPublisher::convert_collision_contacts(const Collisio
 }
 
 CollisionLayersPacket DataPublisher::convert_layer_states(const LayerStates& layer_states) {
+    // =============================================================================
+    // DEBUG: Check what we're converting
+    // =============================================================================
+    std::cout << "\n=== DATA PUBLISHER CONVERT_LAYER_STATES DEBUG ===" << std::endl;
+    std::cout << "Layer 3 primitives count: " << layer_states.layer3_primitives.size() << std::endl;
+    std::cout << "DEBUG: sizeof(Layer3Data_Viz) = " << sizeof(Layer3Data_Viz) << " bytes" << std::endl;
+    std::cout << "DEBUG: sizeof(CollisionLayersPacket) = " << sizeof(CollisionLayersPacket) << " bytes" << std::endl;
+    
+    if (!layer_states.layer3_primitives.empty()) {
+        const auto& first = layer_states.layer3_primitives[0];
+        std::cout << "First Layer 3 primitive engine data: (" 
+                  << std::fixed << std::setprecision(3)
+                  << first.start_point.x() << ", " << first.start_point.y() << ", " << first.start_point.z()
+                  << ") to (" << first.end_point.x() << ", " << first.end_point.y() << ", " << first.end_point.z()
+                  << ") r=" << first.radius << std::endl;
+    }
+    
     CollisionLayersPacket packet;
     
     // Initialize counts
@@ -287,6 +304,25 @@ CollisionLayersPacket DataPublisher::convert_layer_states(const LayerStates& lay
         viz_data.radius = static_cast<float>(primitive.radius);
         viz_data.is_active = 1; // Layer 3 always active
     }
+    
+    // =============================================================================
+    // DEBUG: Check what we converted
+    // =============================================================================
+    if (packet.layer3_count > 0) {
+        std::cout << "Converted " << packet.layer3_count << " Layer 3 primitives for publishing:" << std::endl;
+        for (size_t i = 0; i < packet.layer3_count; ++i) {
+            const auto& viz_data = packet.layer3_primitives[i];
+            std::cout << "  Publishing Layer3[" << i << "]: (" 
+                      << std::fixed << std::setprecision(3)
+                      << viz_data.start_x << ", " << viz_data.start_y << ", " << viz_data.start_z 
+                      << ") to (" << viz_data.end_x << ", " << viz_data.end_y << ", " << viz_data.end_z 
+                      << ") r=" << viz_data.radius << " active=" << (int)viz_data.is_active << std::endl;
+        }
+    } else {
+        std::cout << "❌ NO Layer 3 primitives to publish!" << std::endl;
+    }
+    std::cout << "=== END DATA PUBLISHER DEBUG ===" << std::endl;
+    // =============================================================================
     
     // Layer 2 - Only show ACTIVE primitives (selective loading)
     auto active_layer2_indices = layer_states.get_all_active_layer2_indices();

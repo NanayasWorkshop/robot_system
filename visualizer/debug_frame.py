@@ -40,6 +40,21 @@ class FrameDebugger:
                     frames_checked += 1
                     print(f"📦 Frame {frame.frame_id}: checking completeness...")
                     
+                    # =============================================================================
+                    # DEBUG: Check layer packet reception
+                    # =============================================================================
+                    layer_packets = frame.get_all_packets(PacketType.COLLISION_LAYERS)
+                    print(f"   Layer packets received: {len(layer_packets)}")
+                    if layer_packets:
+                        print(f"   First layer packet size: {len(layer_packets[0])} bytes")
+                        if len(layer_packets[0]) > 100:
+                            print(f"   ✅ Layer packet looks good (size > 100 bytes)")
+                        else:
+                            print(f"   ⚠️  Layer packet very small")
+                    else:
+                        print(f"   ❌ NO layer packets found!")
+                    # =============================================================================
+                    
                     # Check if frame has good data
                     if (frame.has_packet_type(PacketType.ROBOT_CAPSULES) and
                         frame.has_packet_type(PacketType.HUMAN_POSE) and
@@ -273,11 +288,15 @@ class FrameDebugger:
     def add_collision_layers(self, data):
         """Add collision layers as proper 3D mesh objects with grouped legend"""
         if not data or len(data) < 4:
+            print("❌ VISUALIZER: No layer data or data too small")
             return
             
         try:
             import struct
             offset = 0
+            
+            print(f"\n=== VISUALIZER DEBUG: PARSING COLLISION LAYERS ===")
+            print(f"Layer data size: {len(data)} bytes")
             
             # Track which layers have objects for legend
             layer3_objects = []
@@ -286,14 +305,17 @@ class FrameDebugger:
             
             # Parse Layer 3 count
             if offset + 4 > len(data):
+                print("❌ VISUALIZER: Cannot read Layer 3 count")
                 return
             
             layer3_count = struct.unpack('I', data[offset:offset+4])[0]
             offset += 4
+            print(f"VISUALIZER: Layer 3 count = {layer3_count}")
             
             # Parse Layer 3 primitives (capsules)
             for i in range(min(layer3_count, 16)):  # Max 16 from C++
                 if offset + 29 > len(data):  # 7 floats + 1 byte
+                    print(f"❌ VISUALIZER: Layer3[{i}] - not enough data")
                     break
                 
                 values = struct.unpack('fffffffB', data[offset:offset+29])
@@ -301,6 +323,12 @@ class FrameDebugger:
                 end = np.array([values[3], values[4], values[5]])
                 radius = values[6]
                 is_active = values[7]
+                
+                # =============================================================================
+                # DEBUG: Print what visualizer receives
+                # =============================================================================
+                print(f"VISUALIZER receives Layer3[{i}]: ({start[0]:.3f}, {start[1]:.3f}, {start[2]:.3f}) to ({end[0]:.3f}, {end[1]:.3f}, {end[2]:.3f}) r={radius:.3f} active={is_active}")
+                # =============================================================================
                 
                 # Create capsule mesh objects
                 if radius > 0:
@@ -320,15 +348,22 @@ class FrameDebugger:
                         self.fig.add_trace(trace)
                     
                     layer3_objects.extend(capsule_traces)
+                    print(f"  ✅ Added Layer3[{i}] capsule to visualization")
+                else:
+                    print(f"  ⚠️  Layer3[{i}] has zero radius, skipping")
                 
                 offset += 29
             
+            print(f"VISUALIZER: Added {len(layer3_objects)} Layer 3 mesh objects")
+            
             # Parse Layer 2 count
             if offset + 4 > len(data):
+                print("VISUALIZER: Layer 2 parsing complete (no more data)")
                 return
             
             layer2_count = struct.unpack('I', data[offset:offset+4])[0]
             offset += 4
+            print(f"VISUALIZER: Layer 2 count = {layer2_count}")
             
             # Parse Layer 2 primitives (capsules)
             for i in range(min(layer2_count, 32)):  # Max 32 from C++
@@ -363,10 +398,12 @@ class FrameDebugger:
             
             # Parse Layer 1 count
             if offset + 4 > len(data):
+                print("VISUALIZER: Layer 1 parsing complete (no more data)")
                 return
             
             layer1_count = struct.unpack('I', data[offset:offset+4])[0]
             offset += 4
+            print(f"VISUALIZER: Layer 1 count = {layer1_count}")
             
             # Parse Layer 1 primitives (spheres)
             for i in range(min(layer1_count, 128)):  # Max 128 from C++
@@ -396,9 +433,13 @@ class FrameDebugger:
                     layer1_objects.append(sphere_trace)
                 
                 offset += 17
+            
+            print(f"=== END VISUALIZER DEBUG ===")
                 
         except Exception as e:
-            print(f"⚠️ Error parsing collision layers: {e}")
+            print(f"❌ VISUALIZER: Error parsing collision layers: {e}")
+            import traceback
+            traceback.print_exc()
     
     def add_human_vertices(self, vertex_packets, frame_id):
         """Add human mesh vertices"""
@@ -453,7 +494,10 @@ class FrameDebugger:
         # Add collision layers
         layer_packets = frame.get_all_packets(PacketType.COLLISION_LAYERS)
         if layer_packets:
+            print(f"🎯 Processing collision layers ({len(layer_packets)} packets)")
             self.add_collision_layers(layer_packets[-1])
+        else:
+            print("❌ No collision layer packets found in frame!")
         
         # Configure layout
         self.fig.update_layout(

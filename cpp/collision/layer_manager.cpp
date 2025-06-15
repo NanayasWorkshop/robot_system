@@ -612,6 +612,39 @@ void LayerManager::initialize_layer_primitives() {
     std::cout << "  Layer 2: " << layer_states_.layer2_primitives.size() << " primitives" << std::endl;
     std::cout << "  Layer 1: " << layer_states_.layer1_primitives.size() << " primitives" << std::endl;
     std::cout << "  Layer 0: " << layer_states_.layer0_vertex_groups.size() << " vertex groups" << std::endl;
+    
+    // =============================================================================
+    // DEBUG: Joint index verification
+    // =============================================================================
+    std::cout << "\n=== JOINT INDEX VERIFICATION ===" << std::endl;
+    std::vector<std::string> joint_names = {
+        "pelvis", "left_hip", "right_hip", "spine1", "left_knee", "right_knee",
+        "spine2", "left_ankle", "right_ankle", "spine3", "left_foot", "right_foot", 
+        "neck", "left_collar", "right_collar", "head", "left_shoulder", "right_shoulder",
+        "left_elbow", "right_elbow", "left_wrist", "right_wrist", "left_hand", "right_hand"
+    };
+
+    for (const auto& bone_def : simple_bones) {
+        std::cout << "Bone: " << bone_def.name << std::endl;
+        std::cout << "  Start joint[" << bone_def.start_joint << "] = ";
+        if (bone_def.start_joint < joint_names.size()) {
+            std::cout << joint_names[bone_def.start_joint] << std::endl;
+        } else {
+            std::cout << "OUT_OF_BOUNDS!" << std::endl;
+        }
+        
+        std::cout << "  End joint[" << bone_def.end_joint << "] = ";
+        if (bone_def.end_joint < joint_names.size()) {
+            std::cout << joint_names[bone_def.end_joint] << std::endl;
+        } else {
+            std::cout << "OUT_OF_BOUNDS!" << std::endl;
+        }
+        std::cout << std::endl;
+    }
+    std::cout << "=== END JOINT INDEX VERIFICATION ===" << std::endl;
+    // =============================================================================
+    // END DEBUG BLOCK
+    // =============================================================================
 }
 
 void LayerManager::transform_layer_primitives() {
@@ -642,6 +675,55 @@ void LayerManager::transform_layer_primitives() {
         layer_states_.layer3_primitives[i].start_point = current_bone_positions_[bone_def.start_joint];
         layer_states_.layer3_primitives[i].end_point = current_bone_positions_[bone_def.end_joint];
     }
+    
+    // =============================================================================
+    // DEBUG: Layer 3 transform verification
+    // =============================================================================
+    if (layer_states_.current_frame % 30 == 1) { // Only every 30 frames
+        std::cout << "\n=== LAYER 3 TRANSFORM DEBUG (Frame " << layer_states_.current_frame << ") ===" << std::endl;
+        
+        for (size_t i = 0; i < layer_states_.layer3_primitives.size() && i < simple_bones.size(); ++i) {
+            const auto& bone_def = simple_bones[i];
+            const auto& primitive = layer_states_.layer3_primitives[i];
+            
+            std::cout << "Layer3[" << i << "] " << bone_def.name << ":" << std::endl;
+            std::cout << "  Joint indices: " << bone_def.start_joint << " -> " << bone_def.end_joint << std::endl;
+            
+            if (bone_def.start_joint < current_bone_positions_.size() && 
+                bone_def.end_joint < current_bone_positions_.size()) {
+                
+                const auto& joint_start = current_bone_positions_[bone_def.start_joint];
+                const auto& joint_end = current_bone_positions_[bone_def.end_joint];
+                
+                std::cout << "  Expected start: (" << std::fixed << std::setprecision(3)
+                          << joint_start.x() << ", " << joint_start.y() << ", " << joint_start.z() << ")" << std::endl;
+                std::cout << "  Expected end: (" 
+                          << joint_end.x() << ", " << joint_end.y() << ", " << joint_end.z() << ")" << std::endl;
+                std::cout << "  Actual start: (" 
+                          << primitive.start_point.x() << ", " << primitive.start_point.y() << ", " << primitive.start_point.z() << ")" << std::endl;
+                std::cout << "  Actual end: (" 
+                          << primitive.end_point.x() << ", " << primitive.end_point.y() << ", " << primitive.end_point.z() << ")" << std::endl;
+                std::cout << "  Radius: " << primitive.radius << std::endl;
+                
+                // Check if they match
+                double start_diff = (joint_start - primitive.start_point).norm();
+                double end_diff = (joint_end - primitive.end_point).norm();
+                
+                if (start_diff > 0.001 || end_diff > 0.001) {
+                    std::cout << "  ❌ MISMATCH! Start diff: " << start_diff << ", End diff: " << end_diff << std::endl;
+                } else {
+                    std::cout << "  ✅ Match!" << std::endl;
+                }
+            } else {
+                std::cout << "  ❌ JOINT INDEX OUT OF BOUNDS!" << std::endl;
+            }
+            std::cout << std::endl;
+        }
+        std::cout << "=== END LAYER 3 DEBUG ===" << std::endl;
+    }
+    // =============================================================================
+    // END DEBUG BLOCK
+    // =============================================================================
     
     // Transform Layer 2 primitives (simplified - use closest bones)
     // In a full implementation, this would use the exact bone mappings from STAR

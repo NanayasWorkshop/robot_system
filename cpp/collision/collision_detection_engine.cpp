@@ -109,6 +109,25 @@ CollisionResult CollisionDetectionEngine::detect_collisions(
         result.debug_info = "Invalid input parameters";
         return result;
     }
+
+    // =============================================================================
+    // DEBUG: Raw joint input verification
+    // =============================================================================
+    if (total_frame_count_ % 30 == 1) { // Only every 30 frames to avoid spam
+        std::cout << "\n=== RAW JOINT INPUT DEBUG (Frame " << total_frame_count_ << ") ===" << std::endl;
+        for (size_t i = 0; i < bone_positions.size(); ++i) {
+            std::cout << "Joint[" << i << "]: (" 
+                      << std::fixed << std::setprecision(3)
+                      << bone_positions[i].x() << ", " 
+                      << bone_positions[i].y() << ", " 
+                      << bone_positions[i].z() << ")" << std::endl;
+        }
+        std::cout << "Joint count: " << bone_positions.size() << " (expected: 24)" << std::endl;
+        std::cout << "=== END RAW JOINT DEBUG ===" << std::endl;
+    }
+    // =============================================================================
+    // END DEBUG BLOCK
+    // =============================================================================
     
     // Advance frame and update human pose
     layer_manager_->advance_frame();
