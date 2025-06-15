@@ -567,6 +567,16 @@ LayerManager::LayerStats CollisionDetectionEngine::get_layer_statistics() const 
     return layer_manager_->get_layer_statistics();
 }
 
+const LayerStates& CollisionDetectionEngine::get_layer_states() const {
+    if (!initialized_) {
+        // Return empty layer states if not initialized
+        static LayerStates empty_states;
+        return empty_states;
+    }
+    
+    return layer_manager_->get_layer_states();
+}
+
 std::string CollisionDetectionEngine::get_debug_info() const {
     if (!initialized_) {
         return "CollisionDetectionEngine: Not initialized";

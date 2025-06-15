@@ -134,6 +134,12 @@ public:
      * Get current layer statistics
      */
     LayerManager::LayerStats get_layer_statistics() const;
+
+    /**
+     * Get current layer states for visualization
+     * @return const reference to layer states
+     */
+    const LayerStates& get_layer_states() const;
     
     /**
      * Get debug information string

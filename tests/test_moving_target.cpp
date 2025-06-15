@@ -20,9 +20,9 @@
 using namespace delta;
 
 /**
- * Real Collision System Test with Moving Target (UPDATED: Robot→STAR Transform)
- * Tests complete pipeline: Moving Target → FABRIK → Robot Transform → STAR Collision → Visualization
- * NEW APPROACH: Transform robot to STAR coordinates instead of STAR to collision coordinates
+ * Real Collision System Test with Moving Target (UPDATED: Robot→STAR Transform + Layer Visualization)
+ * Tests complete pipeline: Moving Target → FABRIK → Robot Transform → STAR Collision → Visualization + Layers
+ * NEW: Also streams layer states to show selective loading visualization
  */
 class MovingTargetTest {
 private:
@@ -54,7 +54,7 @@ public:
     MovingTargetTest() : frame_count_(0), animation_time_(0.0) {}
     
     bool initialize() {
-        std::cout << "🚀 Initializing Moving Target Test (Robot→STAR Transform)..." << std::endl;
+        std::cout << "🚀 Initializing Moving Target Test (Robot→STAR Transform + Layer Visualization)..." << std::endl;
         
         // Initialize data publisher
         if (!publisher_.initialize("127.0.0.1", 9999, target_fps_)) {
@@ -79,17 +79,18 @@ public:
         }
         std::cout << "✅ CollisionDetectionEngine initialized with STAR vertices (Y-up, meters)" << std::endl;
         
-        std::cout << "✅ Moving Target Test ready (Robot→STAR coordinate transformation)!" << std::endl;
+        std::cout << "✅ Moving Target Test ready (Robot→STAR coordinate transformation + Layer Visualization)!" << std::endl;
         return true;
     }
     
     void run_test_loop() {
-        std::cout << "🎬 Starting moving target animation (Robot→STAR transform)..." << std::endl;
+        std::cout << "🎬 Starting moving target animation (Robot→STAR transform + Layer Visualization)..." << std::endl;
         std::cout << "   Target: Circle orbit in robot coordinates (radius=" << orbit_radius_ << "mm, speed=" << orbit_speed_ << "rps)" << std::endl;
         std::cout << "   Robot: " << num_segments_ << " segments, FABRIK solver → Transform to STAR coordinates with offset(" 
                   << robot_offset_.x() << ", " << robot_offset_.y() << ", " << robot_offset_.z() << ")m" << std::endl;
         std::cout << "   Human: Real STAR with animated mesh (" << current_vertices_.size() << " vertices, native coordinates)" << std::endl;
         std::cout << "   Collision: Both robot and human in STAR coordinate space (Y-up, meters)" << std::endl;
+        std::cout << "   NEW: Layer visualization showing selective loading (Layer 3→2→1→0)" << std::endl;
         std::cout << "   Press Ctrl+C to stop" << std::endl;
         std::cout << std::endl;
         
@@ -136,9 +137,17 @@ public:
             bool publish_success = publisher_.publish_collision_frame(
                 robot_capsules_star.data, current_joints_, current_vertices_, 
                 collision_result, collision_result.computation_time_ms);
-            
+
+            // NEW: Publish layer states to show selective loading visualization
+            bool layer_success = publisher_.publish_layer_states(
+                collision_engine_->get_layer_states());
+
             if (!publish_success) {
                 std::cerr << "⚠️  Failed to publish frame " << frame_count_ << std::endl;
+            }
+
+            if (!layer_success) {
+                std::cerr << "⚠️  Failed to publish layer states " << frame_count_ << std::endl;
             }
             
             // Print statistics every second
@@ -219,6 +228,7 @@ private:
                                const FabrikSolverResult& fabrik_result,
                                const CollisionResult& collision_result) {
         auto publisher_stats = publisher_.get_statistics();
+        auto layer_stats = collision_engine_->get_layer_statistics();
         
         std::cout << "📊 Frame " << frame_count_ 
                   << " | FPS: " << std::fixed << std::setprecision(1) << publisher_stats.current_fps
@@ -231,7 +241,10 @@ private:
             std::cout << " (" << collision_result.contacts.size() << " contacts)";
         }
         
-        std::cout << " | Transform: Robot→STAR"
+        std::cout << " | Layers: L2=" << layer_stats.active_layer2 << "/23"
+                  << " L1=" << layer_stats.active_layer1 << "/76"
+                  << " L0=" << layer_stats.loaded_layer0 << " groups"
+                  << " | Transform: Robot→STAR"
                   << " | Packets: " << publisher_stats.network_stats.packets_sent
                   << " | Success: " << std::setprecision(1) << publisher_stats.network_stats.success_rate << "%"
                   << " | STAR: " << current_vertices_.size() << " verts"
@@ -241,12 +254,13 @@ private:
 };
 
 int main() {
-    std::cout << "🎯 MOVING TARGET COLLISION TEST (ROBOT→STAR TRANSFORM)" << std::endl;
-    std::cout << "========================================================" << std::endl;
-    std::cout << "Real-time collision detection with coordinate transformation optimization" << std::endl;
-    std::cout << "Pipeline: FABRIK (robot coords) → Robot→STAR Transform → Unified Collision → Visualization" << std::endl;
+    std::cout << "🎯 MOVING TARGET COLLISION TEST (ROBOT→STAR TRANSFORM + LAYER VISUALIZATION)" << std::endl;
+    std::cout << "============================================================================" << std::endl;
+    std::cout << "Real-time collision detection with coordinate transformation optimization + layer visualization" << std::endl;
+    std::cout << "Pipeline: FABRIK (robot coords) → Robot→STAR Transform → Unified Collision → Visualization + Layers" << std::endl;
     std::cout << "Optimization: Transform 7 robot capsules instead of 6890 STAR vertices" << std::endl;
     std::cout << "Collision Space: STAR coordinates (Y-up, meters)" << std::endl;
+    std::cout << "NEW: Layer visualization shows selective loading (green→yellow→orange→red)" << std::endl;
     std::cout << std::endl;
     
     MovingTargetTest test;
@@ -256,9 +270,10 @@ int main() {
         return 1;
     }
     
-    std::cout << "📡 Streaming collision data (STAR coords) to UDP localhost:9999..." << std::endl;
+    std::cout << "📡 Streaming collision data + layer states (STAR coords) to UDP localhost:9999..." << std::endl;
     std::cout << "   Start receiver: ./build/test_visualization_receiver" << std::endl;
     std::cout << "   Performance: ~1000x fewer coordinate transformations per frame!" << std::endl;
+    std::cout << "   Layer visualization: See selective loading in action!" << std::endl;
     std::cout << std::endl;
     
     try {

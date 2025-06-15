@@ -1,14 +1,14 @@
 #include "data_publisher.hpp"
-#include "../core/timing.hpp"
 #include <iostream>
-#include <algorithm>
+#include <iomanip>
 
 namespace delta {
 
 DataPublisher::DataPublisher() 
-    : network_sender_(std::make_unique<NetworkSender>())
-    , current_frame_id_(0), target_fps_(30.0), is_running_(false)
-    , total_frames_published_(0), total_publish_time_ms_(0.0) {
+    : current_frame_id_(0), target_fps_(30.0), is_running_(false),
+      total_frames_published_(0), total_publish_time_ms_(0.0) {
+    
+    network_sender_ = std::make_unique<NetworkSender>();
     start_time_ = std::chrono::steady_clock::now();
 }
 
@@ -20,28 +20,33 @@ DataPublisher::~DataPublisher() {
 // INITIALIZATION AND CONFIGURATION
 // =============================================================================
 
-bool DataPublisher::initialize(const std::string& target_ip, uint16_t target_port, double fps) {
-    target_fps_ = fps;
+bool DataPublisher::initialize(const std::string& target_ip, 
+                               uint16_t target_port,
+                               double fps) {
+    
+    std::cout << "🚀 Initializing DataPublisher..." << std::endl;
     
     if (!network_sender_->initialize(target_ip, target_port)) {
-        std::cerr << "DataPublisher: Failed to initialize network sender" << std::endl;
+        std::cerr << "❌ Failed to initialize NetworkSender" << std::endl;
         return false;
     }
     
+    target_fps_ = fps;
     is_running_ = true;
-    start_time_ = std::chrono::steady_clock::now();
-    current_frame_id_ = 0;
     
-    std::cout << "DataPublisher: Initialized at " << fps << " FPS → " 
-              << target_ip << ":" << target_port << std::endl;
+    std::cout << "✅ DataPublisher initialized (target: " << target_ip 
+              << ":" << target_port << ", " << fps << " FPS)" << std::endl;
     
     return true;
 }
 
 void DataPublisher::shutdown() {
-    is_running_ = false;
-    if (network_sender_) {
-        network_sender_->close();
+    if (is_running_) {
+        is_running_ = false;
+        if (network_sender_) {
+            network_sender_->close();
+        }
+        std::cout << "📡 DataPublisher shutdown" << std::endl;
     }
 }
 
@@ -64,59 +69,37 @@ bool DataPublisher::publish_collision_frame(
         return false;
     }
     
-    double publish_time = 0.0;
-    {
-        ScopedTimer timer(publish_time);
-        
-        // Validate input data
-        if (!validate_input_data(robot_capsules, human_joints)) {
-            return false;
-        }
-        
-        // FIXED: Increment frame ID once per complete frame
-        uint32_t frame_id = get_next_frame_id();
-        
-        uint32_t packets_sent = 0;
-        bool success = true;
-        
-        // 1. Publish robot capsules
-        if (success && !robot_capsules.empty()) {
-            success &= publish_robot_capsules_with_frame_id(robot_capsules, frame_id);
-            if (success) packets_sent++;
-        }
-        
-        // 2. Publish human pose
-        if (success && !human_joints.empty()) {
-            success &= publish_human_pose_with_frame_id(human_joints, human_vertices, frame_id);
-            if (success) packets_sent++;
-            
-            // Send vertices separately if present
-            if (success && !human_vertices.empty()) {
-                success &= send_human_vertices_batched_with_frame_id(human_vertices, frame_id);
-                // Note: batched sends count as multiple packets
-            }
-        }
-        
-        // 3. Publish collision contacts
-        if (success) {
-            success &= publish_collision_contacts_with_frame_id(collision_result, frame_id);
-            if (success) packets_sent++;
-        }
-        
-        // 4. Send frame synchronization
-        if (success) {
-            success &= send_frame_sync_with_frame_id(packets_sent, computation_time_ms, frame_id);
-        }
-        
-        if (!success) {
-            std::cerr << "DataPublisher: Failed to publish complete frame " 
-                      << frame_id << std::endl;
-            return false;
-        }
+    double total_time_ms = 0.0;
+    ScopedTimer timer(total_time_ms);
+    
+    uint32_t frame_id = get_next_frame_id();
+    uint32_t packet_count = 0;
+    
+    // Publish robot capsules
+    if (publish_robot_capsules_with_frame_id(robot_capsules, frame_id)) {
+        packet_count++;
     }
     
-    update_statistics(publish_time);
-    return true;
+    // Publish human pose (joints + vertices)
+    if (publish_human_pose_with_frame_id(human_joints, human_vertices, frame_id)) {
+        packet_count++;
+    }
+    
+    // Publish collision contacts
+    if (publish_collision_contacts_with_frame_id(collision_result, frame_id)) {
+        packet_count++;
+    }
+    
+    // Send frame sync
+    bool sync_success = send_frame_sync_with_frame_id(packet_count, computation_time_ms, frame_id);
+    if (sync_success) {
+        packet_count++;
+    }
+    
+    // Update statistics
+    update_statistics(total_time_ms);
+    
+    return packet_count > 0;
 }
 
 bool DataPublisher::publish_layer_states(const LayerStates& layer_states) {
@@ -124,119 +107,53 @@ bool DataPublisher::publish_layer_states(const LayerStates& layer_states) {
         return false;
     }
     
+    double publish_time_ms = 0.0;
+    ScopedTimer timer(publish_time_ms);
+    
     // Convert layer states to visualization format
-    CollisionLayersPacket layers_packet = convert_layer_states(layer_states);
+    auto layer_packet = convert_layer_states(layer_states);
     
     // Create packet header
-    PacketHeader header = create_packet_header<CollisionLayersPacket>(
-        PacketType::COLLISION_LAYERS, get_next_frame_id(), get_current_timestamp_ms());
+    uint32_t frame_id = current_frame_id_; // Use current frame ID
+    uint32_t timestamp = get_current_timestamp_ms();
+    auto header = create_packet_header<CollisionLayersPacket>(
+        PacketType::COLLISION_LAYERS, frame_id, timestamp);
     
     // Serialize and send
     uint8_t buffer[get_total_packet_size<CollisionLayersPacket>()];
-    size_t packet_size = serialize_packet(buffer, header, layers_packet);
+    size_t packet_size = serialize_packet(buffer, header, layer_packet);
     
-    return network_sender_->send_data(buffer, packet_size);
+    bool success = network_sender_->send_data(buffer, packet_size);
+    
+    // Update statistics
+    update_statistics(publish_time_ms);
+    
+    return success;
 }
 
 // =============================================================================
-// INDIVIDUAL PACKET PUBLISHING (Updated with frame ID parameter)
+// INDIVIDUAL PACKET PUBLISHING (Advanced usage)
 // =============================================================================
 
 bool DataPublisher::publish_robot_capsules(const std::vector<CapsuleData>& robot_capsules) {
-    return publish_robot_capsules_with_frame_id(robot_capsules, get_next_frame_id());
-}
-
-bool DataPublisher::publish_robot_capsules_with_frame_id(const std::vector<CapsuleData>& robot_capsules, uint32_t frame_id) {
-    if (!is_ready()) {
-        return false;
-    }
-    
-    // Convert to visualization format
-    RobotCapsulesPacket capsules_packet = convert_robot_capsules(robot_capsules);
-    
-    // Create packet header with provided frame ID
-    PacketHeader header = create_packet_header<RobotCapsulesPacket>(
-        PacketType::ROBOT_CAPSULES, frame_id, get_current_timestamp_ms());
-    
-    // Serialize and send
-    uint8_t buffer[get_total_packet_size<RobotCapsulesPacket>()];
-    size_t packet_size = serialize_packet(buffer, header, capsules_packet);
-    
-    return network_sender_->send_data(buffer, packet_size);
+    uint32_t frame_id = get_next_frame_id();
+    return publish_robot_capsules_with_frame_id(robot_capsules, frame_id);
 }
 
 bool DataPublisher::publish_human_pose(const std::vector<Eigen::Vector3d>& human_joints,
-                                      const std::vector<Eigen::Vector3d>& human_vertices) {
-    return publish_human_pose_with_frame_id(human_joints, human_vertices, get_next_frame_id());
-}
-
-bool DataPublisher::publish_human_pose_with_frame_id(const std::vector<Eigen::Vector3d>& human_joints,
-                                                    const std::vector<Eigen::Vector3d>& human_vertices,
-                                                    uint32_t frame_id) {
-    if (!is_ready()) {
-        return false;
-    }
-    
-    // Convert to visualization format
-    HumanPosePacket pose_packet = convert_human_pose(human_joints);
-    pose_packet.vertex_count = static_cast<uint32_t>(human_vertices.size());
-    
-    // Create packet header with provided frame ID
-    PacketHeader header = create_packet_header<HumanPosePacket>(
-        PacketType::HUMAN_POSE, frame_id, get_current_timestamp_ms());
-    
-    // Serialize and send
-    uint8_t buffer[get_total_packet_size<HumanPosePacket>()];
-    size_t packet_size = serialize_packet(buffer, header, pose_packet);
-    
-    return network_sender_->send_data(buffer, packet_size);
+                                       const std::vector<Eigen::Vector3d>& human_vertices) {
+    uint32_t frame_id = get_next_frame_id();
+    return publish_human_pose_with_frame_id(human_joints, human_vertices, frame_id);
 }
 
 bool DataPublisher::publish_collision_contacts(const CollisionResult& collision_result) {
-    return publish_collision_contacts_with_frame_id(collision_result, get_next_frame_id());
-}
-
-bool DataPublisher::publish_collision_contacts_with_frame_id(const CollisionResult& collision_result, uint32_t frame_id) {
-    if (!is_ready()) {
-        return false;
-    }
-    
-    // Convert to visualization format
-    CollisionContactsPacket contacts_packet = convert_collision_contacts(collision_result);
-    
-    // Create packet header with provided frame ID
-    PacketHeader header = create_packet_header<CollisionContactsPacket>(
-        PacketType::COLLISION_CONTACTS, frame_id, get_current_timestamp_ms());
-    
-    // Serialize and send
-    uint8_t buffer[get_total_packet_size<CollisionContactsPacket>()];
-    size_t packet_size = serialize_packet(buffer, header, contacts_packet);
-    
-    return network_sender_->send_data(buffer, packet_size);
+    uint32_t frame_id = get_next_frame_id();
+    return publish_collision_contacts_with_frame_id(collision_result, frame_id);
 }
 
 bool DataPublisher::send_frame_sync(uint32_t total_packets, double computation_time_ms) {
-    return send_frame_sync_with_frame_id(total_packets, computation_time_ms, current_frame_id_);
-}
-
-bool DataPublisher::send_frame_sync_with_frame_id(uint32_t total_packets, double computation_time_ms, uint32_t frame_id) {
-    if (!is_ready()) {
-        return false;
-    }
-    
-    // Create frame sync packet
-    FrameSyncPacket sync_packet(frame_id, get_current_timestamp_ms(), 
-                               total_packets, static_cast<float>(computation_time_ms));
-    
-    // Create packet header with provided frame ID
-    PacketHeader header = create_packet_header<FrameSyncPacket>(
-        PacketType::FRAME_SYNC, frame_id, get_current_timestamp_ms());
-    
-    // Serialize and send
-    uint8_t buffer[get_total_packet_size<FrameSyncPacket>()];
-    size_t packet_size = serialize_packet(buffer, header, sync_packet);
-    
-    return network_sender_->send_data(buffer, packet_size);
+    uint32_t frame_id = get_next_frame_id();
+    return send_frame_sync_with_frame_id(total_packets, computation_time_ms, frame_id);
 }
 
 // =============================================================================
@@ -246,17 +163,12 @@ bool DataPublisher::send_frame_sync_with_frame_id(uint32_t total_packets, double
 DataPublisher::PublisherStats DataPublisher::get_statistics() const {
     PublisherStats stats;
     stats.frames_published = total_frames_published_;
+    stats.avg_publish_time_ms = (total_frames_published_ > 0) ? 
+        (total_publish_time_ms_ / total_frames_published_) : 0.0;
     
-    if (total_frames_published_ > 0) {
-        stats.avg_publish_time_ms = total_publish_time_ms_ / total_frames_published_;
-    }
-    
-    // Calculate current FPS
-    auto current_time = std::chrono::steady_clock::now();
-    auto elapsed_seconds = std::chrono::duration<double>(current_time - start_time_).count();
-    if (elapsed_seconds > 0.0) {
-        stats.current_fps = total_frames_published_ / elapsed_seconds;
-    }
+    auto elapsed = std::chrono::steady_clock::now() - start_time_;
+    double elapsed_seconds = std::chrono::duration<double>(elapsed).count();
+    stats.current_fps = (elapsed_seconds > 0) ? (total_frames_published_ / elapsed_seconds) : 0.0;
     
     stats.network_stats = network_sender_->get_statistics();
     
@@ -273,17 +185,17 @@ void DataPublisher::reset_statistics() {
 std::string DataPublisher::get_debug_info() const {
     auto stats = get_statistics();
     
-    std::string result = "DataPublisher Debug Info:\n";
-    result += "  Status: " + std::string(is_ready() ? "Ready" : "Not Ready") + "\n";
-    result += "  Target FPS: " + std::to_string(target_fps_) + "\n";
-    result += "  Current FPS: " + std::to_string(stats.current_fps) + "\n";
-    result += "  Frames Published: " + std::to_string(stats.frames_published) + "\n";
-    result += "  Avg Publish Time: " + std::to_string(stats.avg_publish_time_ms) + "ms\n";
-    result += "  Network: " + network_sender_->get_connection_info() + "\n";
-    result += "  Packets Sent: " + std::to_string(stats.network_stats.packets_sent) + "\n";
-    result += "  Success Rate: " + std::to_string(stats.network_stats.success_rate) + "%\n";
+    std::ostringstream info;
+    info << "DataPublisher Debug Info:" << std::endl;
+    info << "  Status: " << (is_running_ ? "Running" : "Stopped") << std::endl;
+    info << "  Target FPS: " << target_fps_ << std::endl;
+    info << "  Current FPS: " << std::fixed << std::setprecision(1) << stats.current_fps << std::endl;
+    info << "  Frames published: " << stats.frames_published << std::endl;
+    info << "  Avg publish time: " << std::setprecision(2) << stats.avg_publish_time_ms << " ms" << std::endl;
+    info << "  Network: " << stats.network_stats.packets_sent << " packets, " 
+         << stats.network_stats.success_rate << "% success" << std::endl;
     
-    return result;
+    return info.str();
 }
 
 // =============================================================================
@@ -292,16 +204,19 @@ std::string DataPublisher::get_debug_info() const {
 
 RobotCapsulesPacket DataPublisher::convert_robot_capsules(const std::vector<CapsuleData>& capsules) {
     RobotCapsulesPacket packet;
-    packet.capsule_count = std::min(static_cast<uint32_t>(capsules.size()), 
-                                   static_cast<uint32_t>(16)); // Max array size
+    packet.capsule_count = std::min(static_cast<uint32_t>(capsules.size()), 16U);
     
-    for (uint32_t i = 0; i < packet.capsule_count; ++i) {
-        const auto& cap = capsules[i];
-        packet.capsules[i] = CapsuleData_Viz(
-            static_cast<float>(cap.start_point.x()), static_cast<float>(cap.start_point.y()), static_cast<float>(cap.start_point.z()),
-            static_cast<float>(cap.end_point.x()), static_cast<float>(cap.end_point.y()), static_cast<float>(cap.end_point.z()),
-            static_cast<float>(cap.radius)
-        );
+    for (size_t i = 0; i < packet.capsule_count; ++i) {
+        const auto& capsule = capsules[i];
+        auto& viz_capsule = packet.capsules[i];
+        
+        viz_capsule.start_x = static_cast<float>(capsule.start_point.x());
+        viz_capsule.start_y = static_cast<float>(capsule.start_point.y());
+        viz_capsule.start_z = static_cast<float>(capsule.start_point.z());
+        viz_capsule.end_x = static_cast<float>(capsule.end_point.x());
+        viz_capsule.end_y = static_cast<float>(capsule.end_point.y());
+        viz_capsule.end_z = static_cast<float>(capsule.end_point.z());
+        viz_capsule.radius = static_cast<float>(capsule.radius);
     }
     
     return packet;
@@ -309,14 +224,16 @@ RobotCapsulesPacket DataPublisher::convert_robot_capsules(const std::vector<Caps
 
 HumanPosePacket DataPublisher::convert_human_pose(const std::vector<Eigen::Vector3d>& joints) {
     HumanPosePacket packet;
-    packet.joint_count = std::min(static_cast<uint32_t>(joints.size()), 
-                                 static_cast<uint32_t>(24)); // STAR joint count
+    packet.joint_count = std::min(static_cast<uint32_t>(joints.size()), 24U);
+    packet.vertex_count = 0; // Vertices sent separately
     
-    for (uint32_t i = 0; i < packet.joint_count; ++i) {
+    for (size_t i = 0; i < packet.joint_count; ++i) {
         const auto& joint = joints[i];
-        packet.joints[i] = JointData_Viz(
-            static_cast<float>(joint.x()), static_cast<float>(joint.y()), static_cast<float>(joint.z())
-        );
+        auto& viz_joint = packet.joints[i];
+        
+        viz_joint.x = static_cast<float>(joint.x());
+        viz_joint.y = static_cast<float>(joint.y());
+        viz_joint.z = static_cast<float>(joint.z());
     }
     
     return packet;
@@ -324,19 +241,22 @@ HumanPosePacket DataPublisher::convert_human_pose(const std::vector<Eigen::Vecto
 
 CollisionContactsPacket DataPublisher::convert_collision_contacts(const CollisionResult& collision_result) {
     CollisionContactsPacket packet;
+    packet.contact_count = std::min(static_cast<uint32_t>(collision_result.contacts.size()), 64U);
     packet.has_collision = collision_result.has_collision ? 1 : 0;
     packet.max_penetration_depth = static_cast<float>(collision_result.max_penetration_depth);
-    packet.contact_count = std::min(static_cast<uint32_t>(collision_result.contacts.size()), 
-                                   static_cast<uint32_t>(64)); // Max array size
     
-    for (uint32_t i = 0; i < packet.contact_count; ++i) {
+    for (size_t i = 0; i < packet.contact_count; ++i) {
         const auto& contact = collision_result.contacts[i];
-        packet.contacts[i] = ContactData_Viz(
-            static_cast<float>(contact.contact_point.x()), static_cast<float>(contact.contact_point.y()), static_cast<float>(contact.contact_point.z()),
-            static_cast<float>(contact.surface_normal.x()), static_cast<float>(contact.surface_normal.y()), static_cast<float>(contact.surface_normal.z()),
-            static_cast<float>(contact.penetration_depth),
-            contact.robot_capsule_index
-        );
+        auto& viz_contact = packet.contacts[i];
+        
+        viz_contact.contact_x = static_cast<float>(contact.contact_point.x());
+        viz_contact.contact_y = static_cast<float>(contact.contact_point.y());
+        viz_contact.contact_z = static_cast<float>(contact.contact_point.z());
+        viz_contact.normal_x = static_cast<float>(contact.surface_normal.x());
+        viz_contact.normal_y = static_cast<float>(contact.surface_normal.y());
+        viz_contact.normal_z = static_cast<float>(contact.surface_normal.z());
+        viz_contact.penetration_depth = static_cast<float>(contact.penetration_depth);
+        viz_contact.robot_capsule_index = static_cast<uint32_t>(contact.robot_capsule_index);
     }
     
     return packet;
@@ -345,53 +265,152 @@ CollisionContactsPacket DataPublisher::convert_collision_contacts(const Collisio
 CollisionLayersPacket DataPublisher::convert_layer_states(const LayerStates& layer_states) {
     CollisionLayersPacket packet;
     
-    // Convert Layer 3 primitives
-    packet.layer3_count = std::min(static_cast<uint32_t>(layer_states.layer3_primitives.size()), 
-                                  static_cast<uint32_t>(16));
-    for (uint32_t i = 0; i < packet.layer3_count; ++i) {
-        const auto& prim = layer_states.layer3_primitives[i];
-        packet.layer3_primitives[i].start_x = static_cast<float>(prim.start_point.x());
-        packet.layer3_primitives[i].start_y = static_cast<float>(prim.start_point.y());
-        packet.layer3_primitives[i].start_z = static_cast<float>(prim.start_point.z());
-        packet.layer3_primitives[i].end_x = static_cast<float>(prim.end_point.x());
-        packet.layer3_primitives[i].end_y = static_cast<float>(prim.end_point.y());
-        packet.layer3_primitives[i].end_z = static_cast<float>(prim.end_point.z());
-        packet.layer3_primitives[i].radius = static_cast<float>(prim.radius);
-        packet.layer3_primitives[i].is_active = prim.is_active ? 1 : 0;
+    // Initialize counts
+    packet.layer3_count = 0;
+    packet.layer2_count = 0; 
+    packet.layer1_count = 0;
+    
+    // Layer 3 - Always show all 9 primitives (always active)
+    const auto& layer3_primitives = layer_states.layer3_primitives;
+    packet.layer3_count = std::min(static_cast<uint32_t>(layer3_primitives.size()), 16U);
+    
+    for (size_t i = 0; i < packet.layer3_count; ++i) {
+        const auto& primitive = layer3_primitives[i];
+        auto& viz_data = packet.layer3_primitives[i];
+        
+        viz_data.start_x = static_cast<float>(primitive.start_point.x());
+        viz_data.start_y = static_cast<float>(primitive.start_point.y());
+        viz_data.start_z = static_cast<float>(primitive.start_point.z());
+        viz_data.end_x = static_cast<float>(primitive.end_point.x());
+        viz_data.end_y = static_cast<float>(primitive.end_point.y());
+        viz_data.end_z = static_cast<float>(primitive.end_point.z());
+        viz_data.radius = static_cast<float>(primitive.radius);
+        viz_data.is_active = 1; // Layer 3 always active
     }
     
-    // Convert Layer 2 primitives
-    packet.layer2_count = std::min(static_cast<uint32_t>(layer_states.layer2_primitives.size()), 
-                                  static_cast<uint32_t>(32));
-    for (uint32_t i = 0; i < packet.layer2_count; ++i) {
-        const auto& prim = layer_states.layer2_primitives[i];
-        packet.layer2_primitives[i].start_x = static_cast<float>(prim.start_point.x());
-        packet.layer2_primitives[i].start_y = static_cast<float>(prim.start_point.y());
-        packet.layer2_primitives[i].start_z = static_cast<float>(prim.start_point.z());
-        packet.layer2_primitives[i].end_x = static_cast<float>(prim.end_point.x());
-        packet.layer2_primitives[i].end_y = static_cast<float>(prim.end_point.y());
-        packet.layer2_primitives[i].end_z = static_cast<float>(prim.end_point.z());
-        packet.layer2_primitives[i].radius = static_cast<float>(prim.radius);
-        packet.layer2_primitives[i].is_active = prim.is_active ? 1 : 0;
+    // Layer 2 - Only show ACTIVE primitives (selective loading)
+    auto active_layer2_indices = layer_states.get_all_active_layer2_indices();
+    packet.layer2_count = std::min(static_cast<uint32_t>(active_layer2_indices.size()), 32U);
+    
+    for (size_t i = 0; i < packet.layer2_count; ++i) {
+        int layer2_idx = active_layer2_indices[i];
+        if (layer2_idx >= 0 && layer2_idx < static_cast<int>(layer_states.layer2_primitives.size())) {
+            const auto& primitive = layer_states.layer2_primitives[layer2_idx];
+            auto& viz_data = packet.layer2_primitives[i];
+            
+            viz_data.start_x = static_cast<float>(primitive.start_point.x());
+            viz_data.start_y = static_cast<float>(primitive.start_point.y());
+            viz_data.start_z = static_cast<float>(primitive.start_point.z());
+            viz_data.end_x = static_cast<float>(primitive.end_point.x());
+            viz_data.end_y = static_cast<float>(primitive.end_point.y());
+            viz_data.end_z = static_cast<float>(primitive.end_point.z());
+            viz_data.radius = static_cast<float>(primitive.radius);
+            viz_data.is_active = 1; // Only sending active ones
+        }
     }
     
-    // Convert Layer 1 primitives
-    packet.layer1_count = std::min(static_cast<uint32_t>(layer_states.layer1_primitives.size()), 
-                                  static_cast<uint32_t>(128));
-    for (uint32_t i = 0; i < packet.layer1_count; ++i) {
-        const auto& prim = layer_states.layer1_primitives[i];
-        packet.layer1_primitives[i].center_x = static_cast<float>(prim.center.x());
-        packet.layer1_primitives[i].center_y = static_cast<float>(prim.center.y());
-        packet.layer1_primitives[i].center_z = static_cast<float>(prim.center.z());
-        packet.layer1_primitives[i].radius = static_cast<float>(prim.radius);
-        packet.layer1_primitives[i].is_active = prim.is_active ? 1 : 0;
+    // Layer 1 - Only show ACTIVE primitives (selective loading)
+    auto active_layer1_indices = layer_states.get_all_active_layer1_indices();
+    packet.layer1_count = std::min(static_cast<uint32_t>(active_layer1_indices.size()), 128U);
+    
+    for (size_t i = 0; i < packet.layer1_count; ++i) {
+        int layer1_idx = active_layer1_indices[i];
+        if (layer1_idx >= 0 && layer1_idx < static_cast<int>(layer_states.layer1_primitives.size())) {
+            const auto& primitive = layer_states.layer1_primitives[layer1_idx];
+            auto& viz_data = packet.layer1_primitives[i];
+            
+            viz_data.center_x = static_cast<float>(primitive.center.x());
+            viz_data.center_y = static_cast<float>(primitive.center.y());
+            viz_data.center_z = static_cast<float>(primitive.center.z());
+            viz_data.radius = static_cast<float>(primitive.radius);
+            viz_data.is_active = 1; // Only sending active ones
+        }
     }
     
     return packet;
 }
 
 bool DataPublisher::send_human_vertices_batched(const std::vector<Eigen::Vector3d>& vertices) {
-    return send_human_vertices_batched_with_frame_id(vertices, current_frame_id_);
+    uint32_t frame_id = current_frame_id_;
+    return send_human_vertices_batched_with_frame_id(vertices, frame_id);
+}
+
+// =============================================================================
+// FRAME ID SPECIFIC METHODS
+// =============================================================================
+
+bool DataPublisher::publish_robot_capsules_with_frame_id(const std::vector<CapsuleData>& robot_capsules, uint32_t frame_id) {
+    if (!is_ready() || robot_capsules.empty()) {
+        return false;
+    }
+    
+    auto packet = convert_robot_capsules(robot_capsules);
+    uint32_t timestamp = get_current_timestamp_ms();
+    auto header = create_packet_header<RobotCapsulesPacket>(PacketType::ROBOT_CAPSULES, frame_id, timestamp);
+    
+    uint8_t buffer[get_total_packet_size<RobotCapsulesPacket>()];
+    size_t packet_size = serialize_packet(buffer, header, packet);
+    
+    return network_sender_->send_data(buffer, packet_size);
+}
+
+bool DataPublisher::publish_human_pose_with_frame_id(const std::vector<Eigen::Vector3d>& human_joints,
+                                                    const std::vector<Eigen::Vector3d>& human_vertices,
+                                                    uint32_t frame_id) {
+    if (!is_ready()) {
+        return false;
+    }
+    
+    bool success = true;
+    
+    // Send joints
+    if (!human_joints.empty()) {
+        auto pose_packet = convert_human_pose(human_joints);
+        uint32_t timestamp = get_current_timestamp_ms();
+        auto header = create_packet_header<HumanPosePacket>(PacketType::HUMAN_POSE, frame_id, timestamp);
+        
+        uint8_t buffer[get_total_packet_size<HumanPosePacket>()];
+        size_t packet_size = serialize_packet(buffer, header, pose_packet);
+        
+        success &= network_sender_->send_data(buffer, packet_size);
+    }
+    
+    // Send vertices in batches
+    if (!human_vertices.empty()) {
+        success &= send_human_vertices_batched_with_frame_id(human_vertices, frame_id);
+    }
+    
+    return success;
+}
+
+bool DataPublisher::publish_collision_contacts_with_frame_id(const CollisionResult& collision_result, uint32_t frame_id) {
+    if (!is_ready()) {
+        return false;
+    }
+    
+    auto packet = convert_collision_contacts(collision_result);
+    uint32_t timestamp = get_current_timestamp_ms();
+    auto header = create_packet_header<CollisionContactsPacket>(PacketType::COLLISION_CONTACTS, frame_id, timestamp);
+    
+    uint8_t buffer[get_total_packet_size<CollisionContactsPacket>()];
+    size_t packet_size = serialize_packet(buffer, header, packet);
+    
+    return network_sender_->send_data(buffer, packet_size);
+}
+
+bool DataPublisher::send_frame_sync_with_frame_id(uint32_t total_packets, double computation_time_ms, uint32_t frame_id) {
+    if (!is_ready()) {
+        return false;
+    }
+    
+    uint32_t timestamp = get_current_timestamp_ms();
+    FrameSyncPacket sync_packet(frame_id, timestamp, total_packets, static_cast<float>(computation_time_ms));
+    auto header = create_packet_header<FrameSyncPacket>(PacketType::FRAME_SYNC, frame_id, timestamp);
+    
+    uint8_t buffer[get_total_packet_size<FrameSyncPacket>()];
+    size_t packet_size = serialize_packet(buffer, header, sync_packet);
+    
+    return network_sender_->send_data(buffer, packet_size);
 }
 
 bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<Eigen::Vector3d>& vertices, uint32_t frame_id) {
@@ -399,51 +418,41 @@ bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<
         return true;
     }
     
-    // OPTIMIZED: Reduced batch size from 1000 to 500 vertices per packet
-    const size_t batch_size = 500;
-    const size_t total_vertices = vertices.size();
-    const uint32_t total_batches = static_cast<uint32_t>((total_vertices + batch_size - 1) / batch_size);
+    const size_t vertices_per_batch = 500; // Reduced from 1000 to 500
+    size_t total_batches = (vertices.size() + vertices_per_batch - 1) / vertices_per_batch;
     
-    // OPTIMIZED: Only log summary, not per-batch details
-    std::cout << "📦 Sending " << total_vertices << " vertices in " << total_batches 
-              << " batches (frame " << frame_id << ")" << std::endl;
+    bool all_success = true;
     
-    for (uint32_t batch_idx = 0; batch_idx < total_batches; ++batch_idx) {
-        HumanVerticesPacket vertices_packet;
-        vertices_packet.batch_index = batch_idx;
-        vertices_packet.total_batches = total_batches;
+    for (size_t batch_idx = 0; batch_idx < total_batches; ++batch_idx) {
+        HumanVerticesPacket vertex_packet;
+        vertex_packet.batch_index = static_cast<uint32_t>(batch_idx);
+        vertex_packet.total_batches = static_cast<uint32_t>(total_batches);
         
-        // Calculate vertices for this batch
-        size_t start_idx = batch_idx * batch_size;
-        size_t end_idx = std::min(start_idx + batch_size, total_vertices);
-        vertices_packet.vertex_count = static_cast<uint32_t>(end_idx - start_idx);
+        size_t start_idx = batch_idx * vertices_per_batch;
+        size_t end_idx = std::min(start_idx + vertices_per_batch, vertices.size());
+        vertex_packet.vertex_count = static_cast<uint32_t>(end_idx - start_idx);
         
-        // Copy vertices to packet
-        for (size_t i = 0; i < vertices_packet.vertex_count; ++i) {
+        // Fill vertex data
+        for (size_t i = 0; i < vertex_packet.vertex_count; ++i) {
             const auto& vertex = vertices[start_idx + i];
-            vertices_packet.vertices[i] = VertexData_Viz(
-                static_cast<float>(vertex.x()), static_cast<float>(vertex.y()), static_cast<float>(vertex.z())
-            );
+            auto& viz_vertex = vertex_packet.vertices[i];
+            
+            viz_vertex.x = static_cast<float>(vertex.x());
+            viz_vertex.y = static_cast<float>(vertex.y());
+            viz_vertex.z = static_cast<float>(vertex.z());
         }
         
-        // Create packet header with provided frame ID (using HUMAN_POSE type with batch info)
-        PacketHeader header = create_packet_header<HumanVerticesPacket>(
-            PacketType::HUMAN_POSE, frame_id, get_current_timestamp_ms());
+        // Send batch
+        uint32_t timestamp = get_current_timestamp_ms();
+        auto header = create_packet_header<HumanVerticesPacket>(PacketType::HUMAN_POSE, frame_id, timestamp);
         
-        // Serialize and send
         uint8_t buffer[get_total_packet_size<HumanVerticesPacket>()];
-        size_t actual_packet_size = serialize_packet(buffer, header, vertices_packet);
+        size_t packet_size = serialize_packet(buffer, header, vertex_packet);
         
-        if (!network_sender_->send_data(buffer, actual_packet_size)) {
-            std::cerr << "❌ Failed to send vertex batch " << batch_idx << "/" << total_batches << std::endl;
-            return false;
-        }
-        
-        // OPTIMIZED: No per-batch success logging
+        all_success &= network_sender_->send_data(buffer, packet_size);
     }
     
-    std::cout << "✅ All " << total_batches << " vertex batches sent successfully" << std::endl;
-    return true;
+    return all_success;
 }
 
 // =============================================================================
@@ -451,9 +460,9 @@ bool DataPublisher::send_human_vertices_batched_with_frame_id(const std::vector<
 // =============================================================================
 
 uint32_t DataPublisher::get_current_timestamp_ms() const {
-    auto current_time = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time_);
-    return static_cast<uint32_t>(elapsed.count());
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = now - start_time_;
+    return static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count());
 }
 
 uint32_t DataPublisher::get_next_frame_id() {
@@ -466,34 +475,30 @@ void DataPublisher::update_statistics(double publish_time_ms) const {
 }
 
 bool DataPublisher::validate_input_data(const std::vector<CapsuleData>& robot_capsules,
-                                       const std::vector<Eigen::Vector3d>& human_joints) const {
-    // Check robot capsules
-    if (robot_capsules.size() > 16) {
-        std::cerr << "DataPublisher: Too many robot capsules (" << robot_capsules.size() 
-                  << "), max 16 supported" << std::endl;
+                                        const std::vector<Eigen::Vector3d>& human_joints) const {
+    
+    if (robot_capsules.empty()) {
+        std::cerr << "⚠️  No robot capsules provided" << std::endl;
         return false;
     }
     
-    // Check human joints
-    if (human_joints.size() > 24) {
-        std::cerr << "DataPublisher: Too many human joints (" << human_joints.size() 
-                  << "), max 24 supported" << std::endl;
+    if (human_joints.size() != 24) {
+        std::cerr << "⚠️  Expected 24 human joints, got " << human_joints.size() << std::endl;
         return false;
     }
     
-    // Validate capsule data
+    // Validate finite values
     for (const auto& capsule : robot_capsules) {
-        if (capsule.radius <= 0.0) {
-            std::cerr << "DataPublisher: Invalid capsule radius: " << capsule.radius << std::endl;
+        if (!capsule.start_point.allFinite() || !capsule.end_point.allFinite() || 
+            !std::isfinite(capsule.radius)) {
+            std::cerr << "⚠️  Invalid robot capsule data" << std::endl;
             return false;
         }
     }
     
-    // Validate joint positions (check for NaN/Inf)
     for (const auto& joint : human_joints) {
-        if (!std::isfinite(joint.x()) || !std::isfinite(joint.y()) || !std::isfinite(joint.z())) {
-            std::cerr << "DataPublisher: Invalid joint position: " 
-                      << joint.x() << ", " << joint.y() << ", " << joint.z() << std::endl;
+        if (!joint.allFinite()) {
+            std::cerr << "⚠️  Invalid human joint data" << std::endl;
             return false;
         }
     }
